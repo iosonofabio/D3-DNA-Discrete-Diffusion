@@ -4,16 +4,16 @@ This repo contains a PyTorch implementation for the paper "Designing DNA With Tu
 
 ## Design Choices
 
-This codebase is built modularly to promote future research (as opposed to a more compact framework, which would be better for applications). The primary files are 
+This codebase is built modularly to promote future research (as opposed to a more compact framework, which would be better for applications). The codebase is organized as follows:
 
-1. ```noise_lib.py```: the noise schedule
-2. ```graph_lib```: the forward diffusion process
-3. ```sampling.py```: the sampling strategies
-4. ```model/```: the model architecture
+1. ```utils/```: utility functions including noise schedules (```noise_lib.py```), forward diffusion process (```graph_lib.py```), data handling, and other core utilities
+2. ```scripts/```: executable scripts including sampling strategies (```sampling.py```), training scripts, and model-specific modules  
+3. ```model/```: the model architecture definitions
+4. ```configs/```: configuration files for different datasets and models
 
 ## Installation
 
-All the training and sampling related codes for D3 are in ```train_n_sample``` folder. Please navigate there and simply run
+Simply run
 
 ```
 conda env create -f environment.yml
@@ -27,15 +27,15 @@ pip install torch==2.0.1+cu117 torchvision==0.15.2+cu117 torchaudio==2.0.2 --ind
 Please install other packages as required (may not have installed from ```environment.yml```).
 
 Steps to note before training:
-1. Please follow codes from [Dirichlet-flow-matching](https://github.com/HannesStark/dirichlet-flow-matching) and [Dirichlet diffusion score model](https://github.com/jzhoulab/ddsm) for setting up the code to train for Promoter dataset. Then uncomment the line ```from promoter_dataset import PromoterDataset``` in ```data.py```. Ignore this step for other datasets.
-2. Comment out all the dataset initialization except for the dataset you want to train D3 in ```data.py```.
+1. Please follow codes from [Dirichlet-flow-matching](https://github.com/HannesStark/dirichlet-flow-matching) and [Dirichlet diffusion score model](https://github.com/jzhoulab/ddsm) for setting up the code to train for Promoter dataset. Then uncomment the line ```from promoter_dataset import PromoterDataset``` in ```utils/data.py```. Ignore this step for other datasets.
+2. Comment out all the dataset initialization except for the dataset you want to train D3 in ```utils/data.py```.
 3. Make proper changes in ```configs/config.yaml``` for the dataset selected, such as data:train and data:valid. A folder will be created inside ```exp_local``` accordingly. Change other values according to the requirement.
 4. Inside ```configs/model/small.yaml```, provide proper length value (promoter -> 1024, deepstarr -> 249, mpra -> 200). Keep cond_dim as 128 for transformer and change it to 256 for convolution architecture.
 5. Select proper file for architecture definition through ```model/__init__.py``` according to the selected dataset. (```transformer.py``` file for deepstarr).
 
 Example training command
 ```
-python train.py noise.type=geometric graph.type=uniform model=small model.scale_by_sigma=False
+python scripts/train.py noise.type=geometric graph.type=uniform model=small model.scale_by_sigma=False
 ```
 This creates a new directory `direc=exp_local/DATE/TIME` with the following structure (compatible with running sampling experiments locally)
 ```
@@ -64,16 +64,16 @@ model.scale_by_sigma      False
 
 Steps to note before sampling:
 1. If you have trained a model, then you should have a folder saved with run timestamp under ```exp_local/"dataset"/``` which contains configuarion files and different checkpoints that can be used for sampling.
-2. If you want to just sample, place the checkpoint file (download links provided below) in ```exp_local/"dataset"/"arch"/checkpoints/``` ("dataset" is either promoter, deepstarr or mpra. "arch" is either Tran or Conv). Please create a folder named ```checkpoints``` under ```exp_local/"dataset"/"arch"/``` and update the file name accordingly in ```load_model.py```(line 26).
+2. If you want to just sample, place the checkpoint file (download links provided below) in ```exp_local/"dataset"/"arch"/checkpoints/``` ("dataset" is either promoter, deepstarr or mpra. "arch" is either Tran or Conv). Please create a folder named ```checkpoints``` under ```exp_local/"dataset"/"arch"/``` and update the file name accordingly in ```utils/load_model.py```(line 26).
 3. The configuration files are already provided in the ```exp_local/"dataset"/"arch"/hydra/``` folders which were generated during training and can be used directly for sampling.
 4. Please download the oracle models for DeepSTARR, MPRA (download links provided below) to be used for MSE calculation.
 5. Please follow codes from [Dirichlet-flow-matching](https://github.com/HannesStark/dirichlet-flow-matching) and [Dirichlet diffusion score model](https://github.com/jzhoulab/ddsm) for downloading SEI features and pretrained models for Promoter dataset.
-6. Run specific codes to sample sequences for a specific dataset. (```run_sample.py``` works by default for DeepSTARR, and requires specific changes for MPRA. ```run_sample_promoter.py``` works for Promoter).
+6. Run specific codes to sample sequences for a specific dataset. (```scripts/run_sample.py``` works by default for DeepSTARR, and requires specific changes for MPRA. ```scripts/run_sample_promoter.py``` works for Promoter).
 
 We can run sampling using a command 
 
 ```
-python run_sample.py --model_path MODEL_PATH --steps STEPS
+python scripts/run_sample.py --model_path MODEL_PATH --steps STEPS
 ```
 The ```model_path``` argument should point to ```exp_local/"dataset"/"arch"/``` folder. If you trained a D3 model, the folder should be ```exp_local/"dataset"/${now:%Y.%m.%d}/${now:%H%M%S}```, which should already be created during training.
 In any case, this will generate samples for all the true test activity levels and store them in the model path. Also it will calculate the mse (between true test vs generated) through the oracle predictions. If you face any key mismatch issue with the pretrained D3 models, please consider un/commenting related variables from model architecture details to solve them.
