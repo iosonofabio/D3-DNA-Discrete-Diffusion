@@ -115,7 +115,7 @@ def _run(rank, world_size, cfg):
 
 
     # load in state
-            state = restore_checkpoint(checkpoint_meta_dir, state, device)
+    state = restore_checkpoint(checkpoint_meta_dir, state, device)
     initial_step = int(state['step'])
 
     # Build data iterators
