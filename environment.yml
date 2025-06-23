@@ -112,7 +112,7 @@ dependencies:
     - ninja==1.11.1.1
     - numpy==1.24.1
     - omegaconf==2.3.0
-    - packaging==23.2
+    - packaging>=23.0
     - pandas==2.2.1
     - pillow==10.2.0
     - protobuf==4.25.3
@@ -150,4 +150,4 @@ dependencies:
     - pytorch-lightning
     - h5py
     - pandas
-prefix: /home/<username>/.conda/envs/d3
+# prefix: /home/<username>/.mamba/envs/d3
