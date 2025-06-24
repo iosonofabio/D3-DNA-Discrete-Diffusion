@@ -11,6 +11,7 @@ from scripts import sampling
 import h5py
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset, DistributedSampler
+from tqdm import tqdm
 
 
 def load_oracle_model(dataset, oracle_path, data_path):
@@ -95,6 +96,8 @@ def main():
                        help="Number of sampling steps (defaults to sequence length)")
     parser.add_argument("--output_dir", type=str, default=None,
                        help="Directory to save results (defaults to model_path)")
+    parser.add_argument("--show_progress", action="store_true",
+                       help="Show progress bar during evaluation")
     args = parser.parse_args()
 
     # Auto-resolve paths if not provided
@@ -147,7 +150,13 @@ def main():
     
     print(f"Starting evaluation for {args.dataset} dataset...")
     
-    for batch_idx, (batch, val_target) in enumerate(test_loader):
+    # Setup progress bar if requested
+    if args.show_progress:
+        pbar = tqdm(test_loader, desc="Processing batches", unit="batch")
+    else:
+        pbar = test_loader
+    
+    for batch_idx, (batch, val_target) in enumerate(pbar):
         if batch.shape[0] != args.batch_size:
             # Adjust sampling function for last batch
             sampling_fn = sampling.get_pc_sampler(
@@ -159,7 +168,13 @@ def main():
         seq_pred_one_hot = F.one_hot(sample, num_classes=4).float()
         val_pred_seq.append(seq_pred_one_hot)
         
-        if (batch_idx + 1) % 10 == 0:
+        # Update progress bar description if using tqdm
+        if args.show_progress:
+            pbar.set_postfix({
+                'batch': f"{batch_idx + 1}/{len(test_loader)}",
+                'seq_length': seq_length
+            })
+        elif (batch_idx + 1) % 10 == 0:
             print(f"Processed {batch_idx + 1}/{len(test_loader)} batches")
     
     # Concatenate all predictions
