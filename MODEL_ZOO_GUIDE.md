@@ -176,16 +176,43 @@ Download and place oracle models in respective folders:
 # Place SEI model at: model_zoo/promoter/oracle_models/best.sei.model.pth.tar
 ```
 
-## ⚙️ Architecture Differences
+## ⚙️ Architecture Selection
 
-### Convolutional vs Transformer
-- **Conv**: Uses convolutional layers, typically faster training
-- **Tran**: Uses transformer architecture, potentially better performance
+### Automatic Architecture Switching
+The D3-DNA models now support **automatic architecture selection** based on configuration files. No manual code editing required!
+
+**How it works:**
+- **Config-driven**: Each config file specifies `model.architecture: "transformer"` or `model.architecture: "convolutional"`
+- **Automatic switching**: Models automatically use the appropriate layers based on config
+- **Validation**: Scripts validate that your `--arch` argument matches the config file
+- **No manual editing**: No more commenting/uncommenting code sections!
+
+### Architecture Types
+
+#### Convolutional vs Transformer
+- **Convolutional** (`--arch Conv`): 
+  - Uses dilated convolutional layers
+  - Typically faster training
+  - Good for sequence-to-sequence tasks
+  - Config: `model.architecture: "convolutional"`
+
+- **Transformer** (`--arch Tran`):
+  - Uses self-attention mechanisms  
+  - Potentially better long-range dependencies
+  - More memory intensive
+  - Config: `model.architecture: "transformer"`
 
 ### Dataset-Specific Models
 - **DeepSTARR**: Uses base transformer (2D signal embedding, 4 classes)
 - **MPRA**: Custom transformer (3D signal embedding, 3 classes)  
 - **Promoter**: Custom transformer (1D signal embedding, no label embedding)
+
+### Architecture Validation
+When you run unified scripts, they automatically:
+1. **Load the config** from the specified path
+2. **Check architecture consistency** between `--arch` argument and config file
+3. **Warn about mismatches** if your command doesn't match the config
+4. **Use the config architecture** as the authoritative source
 
 ## 🔧 Advanced Usage
 

@@ -52,9 +52,9 @@ model_zoo/
 
 ## Quick Start with Unified Scripts
 
-The new unified scripts allow easy training, evaluation, and sampling across all datasets:
+The new unified scripts support **automatic architecture selection** - no more manual code editing!
 
-### Training
+### Training (with Automatic Architecture Selection)
 ```bash
 # Train DeepSTARR with Transformer architecture
 python scripts/run_train_unified.py --dataset deepstarr --arch Tran
@@ -65,6 +65,12 @@ python scripts/run_train_unified.py --dataset mpra --arch Conv
 # Train Promoter with Transformer architecture
 python scripts/run_train_unified.py --dataset promoter --arch Tran
 ```
+
+**New Features:**
+- ✅ **Config-driven architecture selection** (no manual code commenting!)
+- ✅ **Automatic path resolution** for configs and data files  
+- ✅ **Architecture validation** between command line and config files
+- ✅ **Unified interface** across all datasets and architectures
 
 ### Evaluation (with Oracle Models)
 ```bash
