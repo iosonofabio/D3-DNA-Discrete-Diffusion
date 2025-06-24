@@ -43,6 +43,7 @@ optim:
 model:
   name: small
   type: ddit
+  architecture: transformer
   hidden_size: 768
   cond_dim: 128
   length: 1024

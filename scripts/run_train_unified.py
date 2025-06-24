@@ -223,6 +223,16 @@ def main():
     with initialize_config_dir(config_dir=config_dir, version_base=None):
         cfg = compose(config_name=config_name)
     
+    # Validate architecture consistency
+    expected_arch = "convolutional" if args.arch == "Conv" else "transformer"
+    config_arch = getattr(cfg.model, 'architecture', 'transformer')
+    
+    if config_arch != expected_arch:
+        print(f"WARNING: Architecture mismatch!")
+        print(f"  Command line argument: --arch {args.arch} (expects {expected_arch})")
+        print(f"  Config file specifies: {config_arch}")
+        print(f"  Using config file architecture: {config_arch}")
+    
     # Set up multiprocessing
     import torch.multiprocessing as mp
     world_size = cfg.ngpus

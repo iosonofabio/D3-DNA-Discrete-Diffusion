@@ -276,6 +276,7 @@ class SEDD(nn.Module):
             config = OmegaConf.create(config)
 
         self.config = config
+        self.architecture = getattr(config.model, 'architecture', 'transformer')  # Default to transformer for backward compatibility
 
         self.absorb = config.graph.type == "absorb" #we didn't use this
         vocab_size = config.tokens + (1 if self.absorb else 0)
@@ -352,40 +353,41 @@ class SEDD(nn.Module):
 
 
     def forward(self, indices, labels, train, sigma):
-        # ---------------------------------------------#
-        # Below code for transformer based networks
-        x = self.vocab_embed(indices, labels)
-        c = F.silu(self.sigma_map(sigma))# + self.label_embed(labels, train))
-        rotary_cos_sin = self.rotary_emb(x)
+        if self.architecture == 'transformer':
+            # Transformer architecture
+            x = self.vocab_embed(indices, labels)
+            c = F.silu(self.sigma_map(sigma))# + self.label_embed(labels, train))
+            rotary_cos_sin = self.rotary_emb(x)
 
-        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
-            for i in range(len(self.blocks)):
-                x = self.blocks[i](x, rotary_cos_sin, c, seqlens=None)
+            with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+                for i in range(len(self.blocks)):
+                    x = self.blocks[i](x, rotary_cos_sin, c, seqlens=None)
 
-            x = self.output_layer(x, c)
+                x = self.output_layer(x, c)
 
-        x = torch.scatter(x, -1, indices[..., None], torch.zeros_like(x[..., :1]))
+            x = torch.scatter(x, -1, indices[..., None], torch.zeros_like(x[..., :1]))
+            
+        elif self.architecture == 'convolutional':
+            # Convolutional architecture
+            x = torch.nn.functional.one_hot(indices, num_classes=4).float()
+            label = torch.unsqueeze(self.label_emb(labels), dim=2)
+            x = torch.cat([x, label], dim=-1)
+            x = x.permute(0, 2, 1)
+            out = self.act(self.linear(x))
 
-        #---------------------------------------------#
-        # Comment out the above section and uncomment below for convolution based networks
-        # x = torch.nn.functional.one_hot(indices, num_classes=4).float()
-        # label = torch.unsqueeze(self.label_emb(labels), dim=2)
-        # x = torch.cat([x, label], dim=-1)
-        # x = x.permute(0, 2, 1)
-        # out = self.act(self.linear(x))
+            # Label embedding is not required in our case
+            c = F.silu(self.sigma_map(sigma))  # + self.label_embed(labels, train))
 
-        # #Label embedding is not required in our case
-        # c = F.silu(self.sigma_map(sigma))  # + self.label_embed(labels, train))
+            for block, dense, norm in zip(self.conv_blocks, self.denses, self.norms):
+                h = self.act(block(norm(out + dense(c)[:, :, None])))
+                if h.shape == out.shape:
+                    out = h + out
+                else:
+                    out = h
 
-        # for block, dense, norm in zip(self.conv_blocks, self.denses, self.norms):
-        #     h = self.act(block(norm(out + dense(c)[:, :, None])))
-        #     if h.shape == out.shape:
-        #         out = h + out
-        #     else:
-        #         out = h
-
-        # x = self.final(out)
-        # x = x.permute(0, 2, 1)
-        #---------------------------------------------#
+            x = self.final(out)
+            x = x.permute(0, 2, 1)
+        else:
+            raise ValueError(f"Unknown architecture: {self.architecture}. Supported: 'transformer', 'convolutional'")
 
         return x

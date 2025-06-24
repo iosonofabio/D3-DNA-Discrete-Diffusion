@@ -280,6 +280,7 @@ class SEDD(nn.Module):
             config = OmegaConf.create(config)
 
         self.config = config
+        self.architecture = getattr(config.model, 'architecture', 'transformer')  # Default to transformer for backward compatibility
 
         self.absorb = config.graph.type == "absorb"
         vocab_size = config.tokens + (1 if self.absorb else 0)
@@ -299,9 +300,12 @@ class SEDD(nn.Module):
         self.output_layer = DDitFinalLayer(config.model.hidden_size, vocab_size, config.model.cond_dim)
         self.scale_by_sigma = config.model.scale_by_sigma
 
-        #Extra
+        #Extra layers for convolutional architecture
         n = 256
         embed_dim = 256 #Should be same as config.model.cond_dim for conv model
+        # Keep embed layer for compatibility with transformer checkpoints (not used in forward pass)
+        self.embed = nn.Sequential(GaussianFourierProjection(embed_dim=embed_dim),
+                                   nn.Linear(embed_dim, embed_dim))
         self.linear = nn.Conv1d(vocab_size+1, n, kernel_size=9, padding=4)
         self.conv_blocks = nn.ModuleList([nn.Conv1d(n, n, kernel_size=9, padding=4),
                                      nn.Conv1d(n, n, kernel_size=9, padding=4),
@@ -351,34 +355,38 @@ class SEDD(nn.Module):
         )
 
     def forward(self, indices, labels, train, sigma):
-        #---------------------------------------------#
-        # Below line for transformer
-        x = self.vocab_embed(indices, labels)
-        c = F.silu(self.sigma_map(sigma))# + self.label_embed(labels, train))
-        rotary_cos_sin = self.rotary_emb(x)
+        if self.architecture == 'transformer':
+            # Transformer architecture
+            x = self.vocab_embed(indices, labels)
+            c = F.silu(self.sigma_map(sigma))# + self.label_embed(labels, train))
+            rotary_cos_sin = self.rotary_emb(x)
 
-        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
-            for i in range(len(self.blocks)):
-                x = self.blocks[i](x, rotary_cos_sin, c, seqlens=None)
-            x = self.output_layer(x, c)
+            with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+                for i in range(len(self.blocks)):
+                    x = self.blocks[i](x, rotary_cos_sin, c, seqlens=None)
+                x = self.output_layer(x, c)
+                
+            x = torch.scatter(x, -1, indices[..., None], torch.zeros_like(x[..., :1]))
             
-        x = torch.scatter(x, -1, indices[..., None], torch.zeros_like(x[..., :1])) #Transformer
-        #---------------------------------------------#
+        elif self.architecture == 'convolutional':
+            # Convolutional architecture
+            x = torch.nn.functional.one_hot(indices, num_classes=4).float()
+            # Note: promoter uses labels directly, not self.label_emb(labels)
+            x = torch.cat([x, labels], dim=-1)
+            out = x.permute(0, 2, 1)
+            
+            c = F.silu(self.sigma_map(sigma))
+            
+            for block, dense, norm in zip(self.conv_blocks, self.denses, self.norms):
+                h = self.act(block(norm(out + dense(c)[:, :, None])))
+                if h.shape == out.shape:
+                    out = h + out
+                else:
+                    out = h
 
-        #Below lines for convolutions
-        # x = torch.nn.functional.one_hot(indices, num_classes=4).float()
-        # # labels = torch.unsqueeze(self.label_emb(labels), dim=2) #for deepstarr only
-        # x = torch.cat([x, labels], dim=-1)
-        # out = x.permute(0, 2, 1)
-        # for block, dense, norm in zip(self.conv_blocks, self.denses, self.norms):
-        #     h = self.act(block(norm(out + dense(c)[:, :, None])))
-        #     if h.shape == out.shape:
-        #         out = h + out
-        #     else:
-        #         out = h
-        #
-        # out = self.final(out)
-        # x = out.permute(0, 2, 1)
-        #---------------------------------------------#
+            out = self.final(out)
+            x = out.permute(0, 2, 1)
+        else:
+            raise ValueError(f"Unknown architecture: {self.architecture}. Supported: 'transformer', 'convolutional'")
 
         return x

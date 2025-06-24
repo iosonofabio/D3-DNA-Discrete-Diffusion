@@ -98,6 +98,8 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
+    print(f"Generating samples for {args.dataset} with {args.arch} architecture")
+    
     # Load the diffusion model
     model, graph, noise = load_model_local(args.model_path, device)
     
