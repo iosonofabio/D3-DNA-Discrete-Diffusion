@@ -28,7 +28,7 @@ def main():
     device = torch.device('cuda')
     model, graph, noise = load_model_local(args.model_path, device)
 
-    seifeatures = pd.read_csv('promoter_design/target.sei.names', sep='|', header=None)
+    seifeatures = pd.read_csv('model_zoo/promoter/oracle_models/target.sei.names', sep='|', header=None)
     # print (seifeatures)
     def get_sei_profile(seq_one_hot, device=torch.device('cpu')):
         B, L, K = seq_one_hot.shape
@@ -45,7 +45,7 @@ def main():
     # SEI
     sei = NonStrandSpecific(Sei(4096, 21907))
     sei.load_state_dict(upgrade_state_dict(
-        torch.load('promoter_design/best.sei.model.pth.tar', map_location='cpu')['state_dict'],
+        torch.load('model_zoo/promoter/oracle_models/best.sei.model.pth.tar', map_location='cpu')['state_dict'],
         prefixes=['module.']))
     sei.to(device)
 

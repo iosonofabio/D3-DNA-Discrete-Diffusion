@@ -29,43 +29,45 @@ def cycle_loader(dataloader, sampler=None):
 
 
 
-def get_dataloaders(config, distributed=True):
+def get_dataloaders(config, distributed=True, dataset='deepstarr'):
     if config.training.batch_size % (config.ngpus * config.training.accum) != 0:
             raise ValueError(f"Train Batch Size {config.training.batch_size} is not divisible by {config.ngpus} gpus with accumulation {config.training.accum}.")
     if config.eval.batch_size % (config.ngpus * config.training.accum) != 0:
         raise ValueError(f"Eval Batch Size for {config.eval.batch_size} is not divisible by {config.ngpus} gpus with accumulation {config.training.accum}.")
 
-
-    # Deepstarr
-    filepath = os.path.join('DeepSTARR_data.h5')
-    data = h5py.File(filepath, 'r')
-    X_train = torch.tensor(np.array(data['X_train']))
-    y_train = torch.tensor(np.array(data['Y_train']))
-    X_train = torch.argmax(X_train, dim=1)
-    X_valid = torch.tensor(np.array(data['X_valid']))
-    y_valid = torch.tensor(np.array(data['Y_valid']))
-    X_valid = torch.argmax(X_valid, dim=1)
-    train_set = TensorDataset(X_train, y_train)
-    valid_set = TensorDataset(X_valid, y_valid)
-
-    #MPRA
-    # filepath = os.path.join('mpra_data.h5')
-    # dataset = h5py.File(filepath, 'r')
-    # x_train = torch.tensor(np.array(dataset['x_train']).astype(np.float32)).permute(0,2,1)
-    # x_train = torch.argmax(x_train, dim=1)
-    # y_train = torch.tensor(np.array(dataset['y_train']).astype(np.float32))
-    # x_valid = torch.tensor(np.array(dataset['x_valid']).astype(np.float32)).permute(0,2,1)
-    # x_valid = torch.argmax(x_valid, dim=1)
-    # y_valid = torch.tensor(np.array(dataset['y_valid']).astype(np.float32))
-    # x_test = np.array(dataset['x_test']).astype(np.float32)
-    # y_test = np.array(dataset['y_test']).astype(np.float32)
-    #
-    # train_set = TensorDataset(x_train, y_train)
-    # valid_set = TensorDataset(x_valid, y_valid)
-
-    # Promoter
-    # train_set = torch.tensor(np.array(PromoterDataset(n_tsses=100000, rand_offset=10, split='train')))
-    # valid_set = torch.tensor(np.array(PromoterDataset(n_tsses=100000, rand_offset=0, split='test')))
+    if dataset.lower() == 'deepstarr':
+        # Deepstarr
+        filepath = os.path.join('DeepSTARR_data.h5')
+        data = h5py.File(filepath, 'r')
+        X_train = torch.tensor(np.array(data['X_train']))
+        y_train = torch.tensor(np.array(data['Y_train']))
+        X_train = torch.argmax(X_train, dim=1)
+        X_valid = torch.tensor(np.array(data['X_valid']))
+        y_valid = torch.tensor(np.array(data['Y_valid']))
+        X_valid = torch.argmax(X_valid, dim=1)
+        train_set = TensorDataset(X_train, y_train)
+        valid_set = TensorDataset(X_valid, y_valid)
+        
+    elif dataset.lower() == 'mpra':
+        # MPRA
+        filepath = os.path.join('mpra_data.h5')
+        dataset_file = h5py.File(filepath, 'r')
+        x_train = torch.tensor(np.array(dataset_file['x_train']).astype(np.float32)).permute(0,2,1)
+        x_train = torch.argmax(x_train, dim=1)
+        y_train = torch.tensor(np.array(dataset_file['y_train']).astype(np.float32))
+        x_valid = torch.tensor(np.array(dataset_file['x_valid']).astype(np.float32)).permute(0,2,1)
+        x_valid = torch.argmax(x_valid, dim=1)
+        y_valid = torch.tensor(np.array(dataset_file['y_valid']).astype(np.float32))
+        train_set = TensorDataset(x_train, y_train)
+        valid_set = TensorDataset(x_valid, y_valid)
+        
+    elif dataset.lower() == 'promoter':
+        # Promoter
+        train_set = torch.tensor(np.array(PromoterDataset(n_tsses=100000, rand_offset=10, split='train')))
+        valid_set = torch.tensor(np.array(PromoterDataset(n_tsses=100000, rand_offset=0, split='test')))
+        
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}. Supported datasets: 'deepstarr', 'mpra', 'promoter'")
 
     print (len(train_set), len(valid_set))
 

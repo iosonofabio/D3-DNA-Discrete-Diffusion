@@ -23,18 +23,89 @@ which will create a ```d3``` environment with packages installed (please provide
 
 Please install other packages as required (may not have installed from ```environment.yml```).
 
-Steps to note before training:
-1. Please follow codes from [Dirichlet-flow-matching](https://github.com/HannesStark/dirichlet-flow-matching) and [Dirichlet diffusion score model](https://github.com/jzhoulab/ddsm) for setting up the code to train for Promoter dataset. Then uncomment the line ```from promoter_dataset import PromoterDataset``` in ```data.py```. Ignore this step for other datasets.
-2. Comment out all the dataset initialization except for the dataset you want to train D3 in ```data.py```.
-3. Make proper changes in ```configs/config.yaml``` for the dataset selected, such as data:train and data:valid. A folder will be created inside ```exp_local``` accordingly. Change other values according to the requirement.
-4. Inside ```configs/model/small.yaml```, provide proper length value (promoter -> 1024, deepstarr -> 249, mpra -> 200). Keep cond_dim as 128 for transformer and change it to 256 for convolution architecture.
-5. Select proper file for architecture definition through ```model/__init__.py``` according to the selected dataset. (```transformer.py``` file for deepstarr).
+## New Model Zoo Structure
 
-Example training command
+This codebase has been refactored to organize dataset-specific components into a clean `model_zoo` structure:
+
 ```
-python train.py noise.type=geometric graph.type=uniform model=small model.scale_by_sigma=False
+model_zoo/
+├── deepstarr/
+│   ├── config/Conv/hydra/config.yaml    # Convolutional architecture config
+│   ├── config/Tran/hydra/config.yaml    # Transformer architecture config
+│   ├── deepstarr.py                     # PyTorch Lightning training module
+│   ├── checkpoints/                     # Model checkpoints
+│   └── oracle_models/                   # Oracle model files
+├── mpra/
+│   ├── config/Conv/hydra/config.yaml
+│   ├── config/Tran/hydra/config.yaml
+│   ├── transformer_mpra.py              # MPRA-specific model (3D embedding, 3 classes)
+│   ├── mpra.py                          # PyTorch Lightning training module
+│   ├── checkpoints/
+│   └── oracle_models/
+└── promoter/
+    ├── config/Conv/hydra/config.yaml
+    ├── config/Tran/hydra/config.yaml
+    ├── transformer_promoter.py          # Promoter-specific model (1D embedding)
+    ├── checkpoints/
+    └── oracle_models/
 ```
-This creates a new directory `direc=exp_local/DATE/TIME` with the following structure (compatible with running sampling experiments locally)
+
+## Quick Start with Unified Scripts
+
+The new unified scripts allow easy training, evaluation, and sampling across all datasets:
+
+### Training
+```bash
+# Train DeepSTARR with Transformer architecture
+python scripts/run_train_unified.py --dataset deepstarr --arch Tran
+
+# Train MPRA with Convolutional architecture  
+python scripts/run_train_unified.py --dataset mpra --arch Conv
+
+# Train Promoter with Transformer architecture
+python scripts/run_train_unified.py --dataset promoter --arch Tran
+```
+
+### Evaluation (with Oracle Models)
+```bash
+# Evaluate DeepSTARR model
+python scripts/run_evaluate_unified.py --dataset deepstarr --arch Tran --model_path path/to/model
+
+# Evaluate MPRA model
+python scripts/run_evaluate_unified.py --dataset mpra --arch Conv --model_path path/to/model
+```
+
+### Sampling
+```bash
+# Generate 1000 samples for DeepSTARR
+python scripts/run_sampling_unified.py --dataset deepstarr --arch Tran --model_path path/to/model --num_samples 1000
+
+# Generate samples with conditioning
+python scripts/run_sampling_unified.py --dataset mpra --arch Conv --model_path path/to/model --conditioning test
+```
+
+## Setup Requirements
+
+1. **For Promoter dataset**: Follow setup from [Dirichlet-flow-matching](https://github.com/HannesStark/dirichlet-flow-matching) and [Dirichlet diffusion score model](https://github.com/jzhoulab/ddsm), then uncomment the promoter import in `utils/data.py`.
+
+2. **Dataset files**: Place your dataset files in the project root:
+   - `DeepSTARR_data.h5` for DeepSTARR
+   - `mpra_data.h5` for MPRA  
+   - Promoter dataset files as per external setup
+
+3. **Oracle models**: Download and place oracle models in respective `model_zoo/[dataset]/oracle_models/` folders:
+   - [DeepSTARR oracle](https://huggingface.co/anonymous-3E42/DeepSTARR_oracle)
+   - [MPRA oracle](https://huggingface.co/anonymous-3E42/MPRA_oracle)
+
+## Legacy Training (Original Method)
+
+For backward compatibility, the original training method is still available:
+
+```bash
+python scripts/train.py noise.type=geometric graph.type=uniform model=small model.scale_by_sigma=False
+```
+
+This creates a new directory `direc=model_zoo/[dataset]/checkpoints/DATE/TIME` with the following structure:
 ```
 ├── direc
 │   ├── hydra
@@ -49,7 +120,7 @@ This creates a new directory `direc=exp_local/DATE/TIME` with the following stru
 │   │   │   ├── sample_*.txt
 │   ├── logs
 ```
-Here, `checkpoints-meta` is used for reloading the run following interruptions, `samples` contains generated images as the run progresses, and `logs` contains the run output. Arguments can be added with `ARG_NAME=ARG_VALUE`, with important ones being:
+Here, `checkpoints-meta` is used for reloading the run following interruptions, `samples` contains generated sequences as the run progresses, and `logs` contains the run output. Arguments can be added with `ARG_NAME=ARG_VALUE`, with important ones being:
 ```
 ngpus                     the number of gpus to use in training (using pytorch DDP)
 noise.type                geometric
@@ -57,15 +128,34 @@ graph.type                uniform
 model                     small
 model.scale_by_sigma      False
 ```
-### Run Sampling
+## File Organization
 
-Steps to note before sampling:
-1. If you have trained a model, then you should have a folder saved with run timestamp under ```exp_local/"dataset"/``` which contains configuarion files and different checkpoints that can be used for sampling.
-2. If you want to just sample, place the checkpoint file (download links provided below) in ```exp_local/"dataset"/"arch"/checkpoints/``` ("dataset" is either promoter, deepstarr or mpra. "arch" is either Tran or Conv). Please create a folder named ```checkpoints``` under ```exp_local/"dataset"/"arch"/``` and update the file name accordingly in ```load_model.py```(line 26).
-3. The configuration files are already provided in the ```exp_local/"dataset"/"arch"/hydra/``` folders which were generated during training and can be used directly for sampling.
-4. Please download the oracle models for DeepSTARR, MPRA (download links provided below) to be used for MSE calculation.
-5. Please follow codes from [Dirichlet-flow-matching](https://github.com/HannesStark/dirichlet-flow-matching) and [Dirichlet diffusion score model](https://github.com/jzhoulab/ddsm) for downloading SEI features and pretrained models for Promoter dataset.
-6. Run specific codes to sample sequences for a specific dataset. (```run_sample.py``` works by default for DeepSTARR, and requires specific changes for MPRA. ```run_sample_promoter.py``` works for Promoter).
+### Dataset Files
+Place your dataset files in the project root:
+- `DeepSTARR_data.h5` - DeepSTARR dataset
+- `mpra_data.h5` - MPRA dataset  
+- Promoter dataset files (follow external setup instructions)
+
+### Model Checkpoints
+Trained model checkpoints are automatically saved to:
+- `model_zoo/[dataset]/checkpoints/YYYY.MM.DD/HHMMSS/`
+
+For pre-trained models, download and place in:
+- `model_zoo/[dataset]/checkpoints/` (any subdirectory structure)
+
+### Oracle Models  
+Download oracle models and place in:
+- `model_zoo/deepstarr/oracle_models/oracle_DeepSTARR_DeepSTARR_data.ckpt`
+- `model_zoo/mpra/oracle_models/oracle_mpra_mpra_data.ckpt`
+- `model_zoo/promoter/oracle_models/best.sei.model.pth.tar` (SEI model)
+
+### Legacy Sampling (Original Method)
+
+The original sampling scripts are still available:
+- `scripts/run_sample.py` - For DeepSTARR/MPRA (requires manual dataset switching)
+- `scripts/run_sample_promoter.py` - For Promoter dataset
+
+**Note**: Use the new unified scripts (`run_evaluate_unified.py`, `run_sampling_unified.py`) for better experience.
 
 We can run sampling using a command 
 

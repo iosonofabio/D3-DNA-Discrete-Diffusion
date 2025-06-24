@@ -10,8 +10,9 @@ import h5py, os
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset, DistributedSampler
 
-from scripts.PL_DeepSTARR import * #Required for DeepSTARR
-from scripts.PL_mpra import * #Required for MPRA
+# DEPRECATED: This script is deprecated. Please use run_evaluate_unified.py instead.
+# The new unified script provides better functionality and automatic path resolution.
+# Example: python scripts/run_evaluate_unified.py --dataset deepstarr --arch Tran --model_path path/to/model
 
 
 def main():
@@ -29,7 +30,7 @@ def main():
     ##########
     filepath = os.path.join('DeepSTARR_data.h5') #load DeepSTARR data
     data = h5py.File(filepath, 'r')
-    ckpt_aug_path = os.path.join('oracle_DeepSTARR_DeepSTARR_data.ckpt') #Load DeepSTARR oracle model
+    ckpt_aug_path = os.path.join('model_zoo/deepstarr/oracle_models/oracle_DeepSTARR_DeepSTARR_data.ckpt') #Load DeepSTARR oracle model
 
     #We select test data to calculate MSE and generate samples. Change if required
     X_test = torch.tensor(np.array(data['X_test']))
@@ -48,9 +49,9 @@ def main():
 
     #MPRA
     #########
-    # filepath = os.path.join('mpra_data.h5') #load DeepSTARR data
+    # filepath = os.path.join('mpra_data.h5') #load MPRA data
     # data = h5py.File(filepath, 'r')
-    # ckpt_aug_path = os.path.join('oracle_mpra_mpra_data.ckpt') #Load MPRA oracle model
+    # ckpt_aug_path = os.path.join('model_zoo/mpra/oracle_models/oracle_mpra_mpra_data.ckpt') #Load MPRA oracle model
 
     # #We select test data to calculate MSE and generate samples. Change if required
     # X_test = torch.tensor(np.array(data['x_test']).astype(np.float32)).permute(0,2,1)
