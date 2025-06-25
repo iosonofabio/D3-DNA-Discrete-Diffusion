@@ -12,7 +12,7 @@ from scripts.sampling import get_ddim_sampler_wrapper, get_pc_sampler
 import time
 
 
-def test_ddim_sampler(model_path, seq_length=249, batch_size=4, ddim_steps=20):
+def test_ddim_sampler(model_path, seq_length=249, batch_size=4, ddim_steps=20, label_dim=2):
     """
     Test the DDIM sampler with a trained model.
     
@@ -21,6 +21,7 @@ def test_ddim_sampler(model_path, seq_length=249, batch_size=4, ddim_steps=20):
         seq_length: Sequence length
         batch_size: Batch size for testing
         ddim_steps: Number of DDIM steps
+        label_dim: Dimension of labels (default 2 for DeepSTARR/MPRA)
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -38,7 +39,8 @@ def test_ddim_sampler(model_path, seq_length=249, batch_size=4, ddim_steps=20):
         return
     
     # Create dummy labels (e.g., for conditional generation)
-    dummy_labels = torch.zeros(batch_size, device=device)
+    # Based on the model architecture, it expects labels with label_dim dimensions
+    dummy_labels = torch.zeros(batch_size, label_dim, device=device)
     
     # Test DDIM sampler
     print(f"\nTesting DDIM sampler with {ddim_steps} steps...")
@@ -105,6 +107,8 @@ def main():
                        help="Batch size for testing")
     parser.add_argument("--ddim_steps", type=int, default=20,
                        help="Number of DDIM steps")
+    parser.add_argument("--label_dim", type=int, default=2,
+                       help="Dimension of labels (default: 2 for DeepSTARR/MPRA)")
     
     args = parser.parse_args()
     
@@ -117,7 +121,8 @@ def main():
             model_path=args.model_path,
             seq_length=args.seq_length,
             batch_size=args.batch_size,
-            ddim_steps=args.ddim_steps
+            ddim_steps=args.ddim_steps,
+            label_dim=args.label_dim
         )
         print("\n✓ DDIM sampler test completed successfully!")
         
