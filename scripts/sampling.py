@@ -175,6 +175,9 @@ def get_ddim_sampler_wrapper(graph, noise, batch_dims, num_inference_steps=20, e
     
     @torch.no_grad()
     def ddim_wrapper(model, labels):
+        # Create DDIM sampler with the actual model
+        from scripts.ddim_sampling import UniformDDIMSampler
+        
         # Get model in correct format for DDIM sampler
         sampling_score_fn = get_score_fn(model, train=False, sampling=True)
         
@@ -183,8 +186,10 @@ def get_ddim_sampler_wrapper(graph, noise, batch_dims, num_inference_steps=20, e
             # labels are not used in current DDIM implementation, but kept for compatibility
             return sampling_score_fn(x, labels, sigma)
         
-        return ddim_sampler_fn(
-            model=wrapped_model,
+        # Create DDIM sampler instance directly
+        sampler = UniformDDIMSampler(wrapped_model, graph, noise, device, original_model=model)
+        
+        return sampler.sample_ddim(
             batch_size=batch_size,
             seq_length=seq_length,
             num_inference_steps=num_inference_steps,

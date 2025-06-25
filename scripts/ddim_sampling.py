@@ -10,8 +10,9 @@ class UniformDDIMSampler:
     Enables faster sampling with fewer steps while preserving quality.
     """
 
-    def __init__(self, model, graph, noise, device):
-        self.model = model
+    def __init__(self, model, graph, noise, device, original_model=None):
+        self.model = model  # This could be a function or the actual model
+        self.original_model = original_model  # Store original model for eval()
         self.graph = graph
         self.noise = noise
         self.device = device
@@ -59,12 +60,12 @@ class UniformDDIMSampler:
         """
         batch_size = x_t.shape[0]
 
-        # Get noise parameters
-        t_current_tensor = torch.full((batch_size,), t_current, device=self.device)
+        # Get noise parameters - need to reshape for proper broadcasting
+        t_current_tensor = torch.full((batch_size, 1), t_current, device=self.device)
         sigma_current, _ = self.noise(t_current_tensor)
 
         if t_next > 0:
-            t_next_tensor = torch.full((batch_size,), t_next, device=self.device)
+            t_next_tensor = torch.full((batch_size, 1), t_next, device=self.device)
             sigma_next, _ = self.noise(t_next_tensor)
         else:
             sigma_next = torch.zeros_like(sigma_current)
@@ -126,7 +127,11 @@ class UniformDDIMSampler:
             Generated sequences [batch_size, seq_length]
             Optional: Full trajectory if return_trajectory=True
         """
-        self.model.eval()
+        # Set model to eval mode if we have the original model
+        if self.original_model is not None and hasattr(self.original_model, 'eval'):
+            self.original_model.eval()
+        elif hasattr(self.model, 'eval'):
+            self.model.eval()
 
         # Create timestep schedule - linear for now, could be customized
         timesteps = torch.linspace(1.0, 0.0, num_inference_steps + 1, device=self.device)
