@@ -171,6 +171,19 @@ class D3LightningModule(pl.LightningModule):
             
         return loaded_state.get('step', 0)
     
+    def state_dict(self):
+        """Override to include EMA state in Lightning checkpoints."""
+        # Get the default Lightning state dict
+        state = super().state_dict()
+        
+        # Add EMA state with proper prefixes
+        if hasattr(self, 'ema') and self.ema is not None:
+            ema_state = self.ema.state_dict()
+            for key, value in ema_state.items():
+                state[f'ema.{key}'] = value
+        
+        return state
+    
     def load_state_dict(self, state_dict: dict, strict: bool = True):
         """Override to handle both Lightning and original checkpoint formats."""
         # Check if this is an original D3 checkpoint format
@@ -179,8 +192,30 @@ class D3LightningModule(pl.LightningModule):
             step = self.load_from_original_checkpoint_dict(state_dict)
             return step
         else:
-            # This is a Lightning checkpoint, use default loading
-            return super().load_state_dict(state_dict, strict)
+            # This is a Lightning checkpoint
+            # Separate EMA state from model state
+            model_state = {}
+            ema_state = {}
+            
+            for key, value in state_dict.items():
+                if key.startswith('ema.'):
+                    ema_key = key.replace('ema.', '')
+                    ema_state[ema_key] = value
+                else:
+                    model_state[key] = value
+            
+            # Load model state using parent method
+            result = super().load_state_dict(model_state, strict=False)
+            
+            # Load EMA state separately if it exists
+            if ema_state and hasattr(self, 'ema'):
+                try:
+                    self.ema.load_state_dict(ema_state)
+                    print("✓ Loaded EMA state from Lightning checkpoint")
+                except Exception as e:
+                    print(f"⚠ Could not load EMA state: {e}")
+            
+            return result
     
     def load_from_original_checkpoint_dict(self, state_dict: dict):
         """Load from original checkpoint dictionary."""
@@ -265,18 +300,34 @@ class PromoterD3LightningModule(D3LightningModule):
     """Lightning module specifically for Promoter dataset using promoter-specific SEDD."""
     
     def __init__(self, cfg):
-        # Initialize parent but override score_model
-        super().__init__(cfg, dataset_name='promoter')
+        # Don't call super().__init__ as it will create the wrong model
+        # Instead, initialize the LightningModule directly
+        pl.LightningModule.__init__(self)
+        self.save_hyperparameters()
+        self.cfg = cfg
+        self.dataset_name = 'promoter'
         
         # Use promoter-specific SEDD model
         SEDD_class = get_model_class_for_dataset('promoter')
         self.score_model = SEDD_class(cfg)
         
-        # Update EMA for the new model
+        # Initialize other components
+        self.graph = None  # Will be initialized in setup()
+        self.noise = None  # Will be initialized in setup()
+        
+        # EMA setup
         self.ema = ExponentialMovingAverage(
             self.score_model.parameters(), 
             decay=cfg.training.ema
         )
+        
+        # Loss function will be set up in setup()
+        self.loss_fn = None
+        self.sampling_eps = 1e-5
+        
+        # Accumulation setup
+        self.accum_iter = 0
+        self.total_loss = 0
         
         print("✓ Initialized PromoterD3LightningModule with promoter-specific SEDD")
 
@@ -285,18 +336,34 @@ class MPRAD3LightningModule(D3LightningModule):
     """Lightning module specifically for MPRA dataset using MPRA-specific SEDD."""
     
     def __init__(self, cfg):
-        # Initialize parent but override score_model
-        super().__init__(cfg, dataset_name='mpra')
+        # Don't call super().__init__ as it will create the wrong model
+        # Instead, initialize the LightningModule directly
+        pl.LightningModule.__init__(self)
+        self.save_hyperparameters()
+        self.cfg = cfg
+        self.dataset_name = 'mpra'
         
         # Use MPRA-specific SEDD model
         SEDD_class = get_model_class_for_dataset('mpra')
         self.score_model = SEDD_class(cfg)
         
-        # Update EMA for the new model
+        # Initialize other components
+        self.graph = None  # Will be initialized in setup()
+        self.noise = None  # Will be initialized in setup()
+        
+        # EMA setup
         self.ema = ExponentialMovingAverage(
             self.score_model.parameters(), 
             decay=cfg.training.ema
         )
+        
+        # Loss function will be set up in setup()
+        self.loss_fn = None
+        self.sampling_eps = 1e-5
+        
+        # Accumulation setup
+        self.accum_iter = 0
+        self.total_loss = 0
         
         print("✓ Initialized MPRAD3LightningModule with MPRA-specific SEDD")
 
