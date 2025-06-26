@@ -168,7 +168,12 @@ def main():
     with open_dict(cfg):
         cfg.work_dir = work_dir
         cfg.dataset_name = args.dataset
-        cfg.architecture = args.arch
+        # Architecture is already correctly set by loading the arch-specific config
+        # Verify it matches the command line argument
+        expected_arch = "convolutional" if args.arch == "Conv" else "transformer"
+        if not hasattr(cfg.model, 'architecture') or cfg.model.architecture != expected_arch:
+            print(f"WARNING: Config architecture mismatch. Setting to {expected_arch}")
+            cfg.model.architecture = expected_arch
     
     print(f"Working directory: {work_dir}")
     print(f"Training {args.dataset} with {args.arch} architecture")

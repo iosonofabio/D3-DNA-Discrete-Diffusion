@@ -242,17 +242,32 @@ class D3DataModule(pl.LightningDataModule):
         """Setup train and validation datasets."""
         from utils import data
         
-        # Use existing data loading functionality
+        # Use dataset loading function (not dataloaders)
         if self.dataset_name:
-            self.train_ds, self.val_ds = data.get_dataloaders(self.cfg, dataset=self.dataset_name)
+            self.train_ds, self.val_ds = data.get_datasets(dataset=self.dataset_name)
         else:
-            self.train_ds, self.val_ds = data.get_dataloaders(self.cfg)
+            self.train_ds, self.val_ds = data.get_datasets()
     
     def train_dataloader(self):
-        return self.train_ds
+        from torch.utils.data import DataLoader
+        return DataLoader(
+            self.train_ds,
+            batch_size=self.cfg.training.batch_size // (self.cfg.ngpus * self.cfg.training.accum),
+            num_workers=4,
+            pin_memory=True,
+            shuffle=True,
+            persistent_workers=True,
+        )
     
     def val_dataloader(self):
-        return self.val_ds
+        from torch.utils.data import DataLoader
+        return DataLoader(
+            self.val_ds,
+            batch_size=self.cfg.eval.batch_size // (self.cfg.ngpus * self.cfg.training.accum),
+            num_workers=4,
+            pin_memory=True,
+            shuffle=False,
+        )
 
 
 # Model Factory Pattern for Dataset-Specific Implementations
