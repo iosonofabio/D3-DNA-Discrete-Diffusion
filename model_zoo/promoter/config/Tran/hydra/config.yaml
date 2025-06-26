@@ -1,4 +1,4 @@
-ngpus: 2
+ngpus: 1
 tokens: 4
 training:
   batch_size: 128

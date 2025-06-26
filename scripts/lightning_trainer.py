@@ -403,7 +403,7 @@ def create_trainer_from_config(cfg, dataset_name: Optional[str] = None, **traine
     if cfg.ngpus > 1:
         default_trainer_args.update({
             'devices': cfg.ngpus,
-            'num_nodes': cfg.nnodes,
+            'num_nodes': getattr(cfg, 'nnodes', 1),  # Default to 1 node if not specified
             'strategy': 'ddp',
             'sync_batchnorm': True,
         })
