@@ -21,3 +21,4 @@ mamba install pytorch=2.5 torchvision pytorch-cuda=12.4 -c pytorch -c nvidia --y
 pip install wandb dm-tree pytorch-lightning transformers hydra-core omegaconf hydra-submitit-launcher scikit-learn
 mamba install ipykernel ipywidgets biotite matplotlib seaborn h5py --yes # lightning
 pip install flash-attn==2.7.4.post1 --no-build-isolation
+pip install -U tensorboard tensorboardX

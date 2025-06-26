@@ -1,4 +1,5 @@
-ngpus: 1
+ngpus: 4
+nnodes: 2
 tokens: 4
 training:
   batch_size: 256
@@ -51,3 +52,10 @@ model:
   n_heads: 12
   scale_by_sigma: false
   dropout: 0.1
+wandb:
+  enabled: true
+  project: d3-dna-diffusion
+  name: deepstarr-tran
+  entity: null
+  tags: []
+  notes: ""

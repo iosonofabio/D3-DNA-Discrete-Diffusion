@@ -48,6 +48,11 @@ class D3LightningModule(pl.LightningModule):
         self.graph = graph_lib.get_graph(self.cfg, self.device)
         self.noise = noise_lib.get_noise(self.cfg).to(self.device)
         
+        # Move EMA shadow parameters to the correct device (important for distributed training)
+        if hasattr(self, 'ema') and hasattr(self.ema, 'shadow_params'):
+            for i, shadow_param in enumerate(self.ema.shadow_params):
+                self.ema.shadow_params[i] = shadow_param.to(self.device)
+        
         # Setup loss function
         self.loss_fn = losses.get_loss_fn(
             self.noise, self.graph, train=True, sampling_eps=self.sampling_eps
@@ -77,11 +82,13 @@ class D3LightningModule(pl.LightningModule):
             # Update EMA
             self.ema.update(self.score_model.parameters())
             
-            # Log the accumulated loss
-            accumulated_loss = self.total_loss
-            self.log('train_loss', accumulated_loss, on_step=True, on_epoch=True, prog_bar=True)
+            # Log the accumulated loss (detached for logging)
+            accumulated_loss_log = self.total_loss
+            self.log('train_loss', accumulated_loss_log, on_step=True, on_epoch=True, prog_bar=True)
             self.total_loss = 0
-            return accumulated_loss
+            
+            # Return the current loss (with gradients) for Lightning to handle backward
+            return loss
             
         return loss
     
@@ -391,6 +398,7 @@ def create_trainer_from_config(cfg, dataset_name: Optional[str] = None, **traine
         'max_steps': cfg.training.n_iters,
         'log_every_n_steps': cfg.training.log_freq,
         'val_check_interval': cfg.training.eval_freq,
+        'check_val_every_n_epoch': None,  # Allow step-based validation across epochs
         'accumulate_grad_batches': cfg.training.accum,
         'precision': 'bf16-mixed',  # Use mixed precision like original
         'gradient_clip_val': cfg.optim.grad_clip if cfg.optim.grad_clip >= 0 else None,

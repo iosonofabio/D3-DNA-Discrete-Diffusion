@@ -44,11 +44,16 @@ def setup_logging(cfg, work_dir):
     
     # WandB logger if configured
     if hasattr(cfg, 'wandb') and cfg.wandb.get('enabled', False):
+        # Convert OmegaConf to plain dict for WandB compatibility
+        from omegaconf import OmegaConf
+        config_dict = OmegaConf.to_yaml(cfg)
+        
         wandb_logger = WandbLogger(
-            project=cfg.wandb.get('project', 'd3-dna-diffusion'),
+            entity='54yyyu',
+            project=cfg.wandb.get('project', 'D3'),
             name=cfg.wandb.get('name', os.path.basename(work_dir)),
             save_dir=work_dir,
-            config=cfg
+            config=OmegaConf.to_container(cfg, resolve=True)  # Convert to plain dict
         )
         loggers.append(wandb_logger)
     

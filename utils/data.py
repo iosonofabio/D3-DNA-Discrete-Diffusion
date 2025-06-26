@@ -163,7 +163,7 @@ def get_datasets(dataset='deepstarr'):
     """
     if dataset.lower() == 'deepstarr':
         # Deepstarr
-        filepath = os.path.join('DeepSTARR_data.h5')
+        filepath = os.path.join('model_zoo', 'deepstarr', 'DeepSTARR_data.h5')
         data = h5py.File(filepath, 'r')
         X_train = torch.tensor(np.array(data['X_train']))
         y_train = torch.tensor(np.array(data['Y_train']))
@@ -176,7 +176,7 @@ def get_datasets(dataset='deepstarr'):
         
     elif dataset.lower() == 'mpra':
         # MPRA
-        filepath = os.path.join('mpra_data.h5')
+        filepath = os.path.join('model_zoo', 'mpra', 'mpra_data.h5')
         dataset_file = h5py.File(filepath, 'r')
         x_train = torch.tensor(np.array(dataset_file['x_train']).astype(np.float32)).permute(0,2,1)
         x_train = torch.argmax(x_train, dim=1)
