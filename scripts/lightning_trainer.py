@@ -388,6 +388,7 @@ def create_trainer_from_config(cfg, dataset_name: Optional[str] = None, **traine
     if cfg.ngpus > 1:
         default_trainer_args.update({
             'devices': cfg.ngpus,
+            'num_nodes': cfg.nnodes,
             'strategy': 'ddp',
             'sync_batchnorm': True,
         })
