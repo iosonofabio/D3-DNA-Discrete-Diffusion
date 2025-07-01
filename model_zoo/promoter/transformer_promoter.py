@@ -331,8 +331,8 @@ class SEDD(nn.Module):
         self.denses = nn.ModuleList([Dense(embed_dim, n) for _ in range(20)])
         self.norms = nn.ModuleList([nn.GroupNorm(1, n) for _ in range(20)])
 
-        # The swish activation function
-        self.act = lambda x: x * torch.sigmoid(x)
+        # The swish activation function (SiLU is functionally identical but serializable)
+        self.act = nn.SiLU()
         self.relu = nn.ReLU()
         self.softplus = nn.Softplus()
         self.scale = nn.Parameter(torch.ones(1))

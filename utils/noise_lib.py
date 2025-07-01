@@ -42,7 +42,7 @@ class GeometricNoise(Noise, nn.Module):
         self.sigmas = 1.0 * torch.tensor([sigma_min, sigma_max])
         if learnable:
             self.sigmas = nn.Parameter(self.sigmas)
-        self.empty = nn.Parameter(torch.tensor(0.0))
+        # self.empty = nn.Parameter(torch.tensor(0.0))
 
     def rate_noise(self, t):
         return self.sigmas[0] ** (1 - t) * self.sigmas[1] ** t * (self.sigmas[1].log() - self.sigmas[0].log())

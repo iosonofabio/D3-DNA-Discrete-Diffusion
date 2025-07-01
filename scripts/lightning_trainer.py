@@ -4,6 +4,7 @@ import pytorch_lightning as pl
 from itertools import chain
 import os
 import sys
+import datetime
 from typing import Any, Dict, Optional
 
 from model import SEDD
@@ -84,7 +85,7 @@ class D3LightningModule(pl.LightningModule):
             
             # Log the accumulated loss (detached for logging)
             accumulated_loss_log = self.total_loss
-            self.log('train_loss', accumulated_loss_log, on_step=True, on_epoch=True, prog_bar=True)
+            self.log('train_loss', accumulated_loss_log, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
             self.total_loss = 0
             
             # Return the current loss (with gradients) for Lightning to handle backward
@@ -118,7 +119,7 @@ class D3LightningModule(pl.LightningModule):
         # Restore original weights
         self.ema.restore(self.score_model.parameters())
         
-        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
     
     def configure_optimizers(self):
@@ -403,7 +404,7 @@ def create_trainer_from_config(cfg, dataset_name: Optional[str] = None, **traine
         'precision': 'bf16-mixed',  # Use mixed precision like original
         'gradient_clip_val': cfg.optim.grad_clip if cfg.optim.grad_clip >= 0 else None,
         'enable_checkpointing': True,
-        'enable_progress_bar': True,
+        'enable_progress_bar': False, #True
         'enable_model_summary': True,
     }
     
@@ -412,7 +413,7 @@ def create_trainer_from_config(cfg, dataset_name: Optional[str] = None, **traine
         default_trainer_args.update({
             'devices': cfg.ngpus,
             'num_nodes': getattr(cfg, 'nnodes', 1),  # Default to 1 node if not specified
-            'strategy': 'ddp',
+            'strategy': 'ddp_find_unused_parameters_true',  # More robust for cluster environments
             'sync_batchnorm': True,
         })
     else:
