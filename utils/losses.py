@@ -6,7 +6,7 @@ from utils import graph_lib
 from utils.utils import get_score_fn
 
 
-def get_loss_fn(noise, graph, train, sampling_eps=1e-3, lv=False):
+def get_loss_fn(noise, graph, train, sampling_eps=1e-3, lv=False, sc=False):
 
     def loss_fn(model, batch, labels, cond=None, t=None, perturbed_batch=None):
         """
@@ -26,11 +26,33 @@ def get_loss_fn(noise, graph, train, sampling_eps=1e-3, lv=False):
 
         log_score_fn = get_score_fn(model, train=train, sampling=False)
         log_score = log_score_fn(perturbed_batch, labels, sigma)
-        loss = graph.score_entropy(log_score, sigma[:, None], perturbed_batch, batch)
 
-        loss = (dsigma[:, None] * loss).sum(dim=-1)
-
-        return loss
+        if sc:
+            # Use the complex loss calculation with sampling consistency
+            curr_sigma, curr_dsigma = noise(t/2)
+            curr_score = log_score_fn(perturbed_batch, labels, curr_sigma)
+            t_dsigma = t/2 * curr_dsigma
+            rev_rate = t_dsigma[..., None, None] * graph.reverse_rate(perturbed_batch, curr_score)
+            x = graph.sample_rate(perturbed_batch, rev_rate)
+            next_sigma, next_dsigma = noise(sampling_eps)
+            next_score = log_score_fn(x, labels, next_sigma)
+            t_dsigma_next = sampling_eps * next_dsigma
+            rev_rate_next = t_dsigma_next[..., None, None].to(batch.device) * graph.reverse_rate(x, next_score)
+            x_next = graph.sample_rate(x, rev_rate_next)
+            l2_loss = ((batch - x_next)**2)
+            mask = torch.rand(batch.shape[0], device=batch.device) < 0.25
+            expanded_mask = mask.unsqueeze(-1).expand_as(l2_loss)
+            loss = graph.score_entropy(log_score, sigma[:, None], perturbed_batch, batch)
+            loss = (dsigma[:, None] * loss)
+            main_loss = loss.clone()
+            main_loss[expanded_mask] = loss[expanded_mask] + l2_loss[expanded_mask]
+            final_loss = main_loss.sum(dim=-1)
+            return final_loss
+        else:
+            # Use the original simple loss calculation
+            loss = graph.score_entropy(log_score, sigma[:, None], perturbed_batch, batch)
+            loss = (dsigma[:, None] * loss).sum(dim=-1)
+            return loss
 
     return loss_fn
 
