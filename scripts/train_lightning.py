@@ -25,6 +25,7 @@ from scripts.lightning_trainer import (
 )
 from utils.utils import load_hydra_config_from_run, makedirs, get_logger
 from utils.checkpoint_utils import is_original_checkpoint
+from utils.sp_mse_callback import SPMSEValidationCallback
 
 
 def setup_logging(cfg, work_dir):
@@ -60,7 +61,7 @@ def setup_logging(cfg, work_dir):
     return loggers
 
 
-def setup_callbacks(cfg, work_dir):
+def setup_callbacks(cfg, work_dir, dataset_name=None):
     """Setup Lightning callbacks."""
     callbacks = []
     
@@ -91,7 +92,52 @@ def setup_callbacks(cfg, work_dir):
         )
         callbacks.append(early_stopping)
     
+    # SP-MSE validation callback (optional)
+    sp_mse_callback = setup_sp_mse_callback(cfg, dataset_name)
+    if sp_mse_callback:
+        callbacks.append(sp_mse_callback)
+    
     return callbacks
+
+
+def setup_sp_mse_callback(cfg, dataset_name):
+    """Setup SP-MSE validation callback if enabled."""
+    if not hasattr(cfg, 'sp_mse_validation') or not cfg.sp_mse_validation.enabled:
+        return None
+    
+    # Auto-resolve paths if not provided
+    oracle_path = cfg.sp_mse_validation.oracle_path
+    data_path = cfg.sp_mse_validation.data_path
+    
+    if oracle_path is None and dataset_name:
+        oracle_files = {
+            'deepstarr': 'oracle_DeepSTARR_DeepSTARR_data.ckpt',
+            'mpra': 'oracle_mpra_mpra_data.ckpt',
+            'promoter': 'best.sei.model.pth.tar'
+        }
+        oracle_path = f"model_zoo/{dataset_name.lower()}/oracle_models/{oracle_files[dataset_name.lower()]}"
+    
+    if data_path is None and dataset_name:
+        data_files = {
+            'deepstarr': 'DeepSTARR_data.h5',
+            'mpra': 'mpra_data.h5',
+            'promoter': 'promoter_data.h5'
+        }
+        data_path = data_files[dataset_name.lower()]
+    
+    sp_mse_callback = SPMSEValidationCallback(
+        dataset=dataset_name or 'deepstarr',
+        oracle_path=oracle_path,
+        data_path=data_path,
+        validation_freq=cfg.sp_mse_validation.validation_freq,
+        validation_samples=cfg.sp_mse_validation.validation_samples,
+        enabled=cfg.sp_mse_validation.enabled,
+        sampling_steps=cfg.sp_mse_validation.sampling_steps,
+        early_stopping_patience=cfg.sp_mse_validation.early_stopping_patience
+    )
+    
+    print(f"✓ Added SP-MSE validation callback for {dataset_name} dataset")
+    return sp_mse_callback
 
 
 def load_from_checkpoint(checkpoint_path, model, cfg, dataset_name):
@@ -209,7 +255,7 @@ def main():
     
     # Setup loggers and callbacks
     loggers = setup_logging(cfg, work_dir)
-    callbacks = setup_callbacks(cfg, work_dir)
+    callbacks = setup_callbacks(cfg, work_dir, args.dataset)
     
     # Create trainer
     trainer_kwargs = {
