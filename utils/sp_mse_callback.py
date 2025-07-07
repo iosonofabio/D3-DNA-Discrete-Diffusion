@@ -4,8 +4,8 @@ import numpy as np
 import sys
 import os
 from typing import Optional, Any
-from lightning.pytorch.callbacks import Callback
-from lightning.pytorch import LightningModule, Trainer
+from pytorch_lightning.callbacks import Callback
+from pytorch_lightning import LightningModule, Trainer
 
 from scripts import sampling
 

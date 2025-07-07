@@ -5,7 +5,7 @@
 #SBATCH --error=d3-dna-diffusion.err
 #SBATCH --time=24:00:00
 #SBATCH --partition=gpuq
-#SBATCH --gres=gpu:h100:4
+#SBATCH --gres=gpu:h100:2
 # #SBATCH --nodes=1
 # #SBATCH --ntasks-per-node=4
 # #SBATCH --cpus-per-task=2
@@ -18,5 +18,7 @@ mamba activate d3
 cd ~/scratch/D3-DNA-Discrete-Diffusion
 
 # srun python scripts/train_lightning.py --dataset deepstarr --arch Tran # --config model_zoo/deepstarr/config/Tran/hydra/config.yaml
+
+# srun --partition=gpuq --qos=bio_ai --mem=64G --time=48:00:00 --gres=gpu:h100:2 --pty /bin/bash
 
 python scripts/train_lightning.py --dataset deepstarr --arch Tran # --config model_zoo/deepstarr/config/Tran/hydra/config.yaml
