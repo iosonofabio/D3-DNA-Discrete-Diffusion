@@ -170,7 +170,7 @@ class D3LightningModule(pl.LightningModule):
         
         # Load EMA weights
         if 'ema' in loaded_state:
-            self.ema.load_state_dict(loaded_state['ema'])
+            self.ema.load_state_dict(loaded_state['ema'], device=self.device)
             print("✓ Loaded EMA weights from original checkpoint")
         
         # Load step counter for logging
@@ -218,7 +218,7 @@ class D3LightningModule(pl.LightningModule):
             # Load EMA state separately if it exists
             if ema_state and hasattr(self, 'ema'):
                 try:
-                    self.ema.load_state_dict(ema_state)
+                    self.ema.load_state_dict(ema_state, device=self.device)
                     print("✓ Loaded EMA state from Lightning checkpoint")
                 except Exception as e:
                     print(f"⚠ Could not load EMA state: {e}")
@@ -233,7 +233,7 @@ class D3LightningModule(pl.LightningModule):
         
         # Load EMA weights  
         if 'ema' in state_dict:
-            self.ema.load_state_dict(state_dict['ema'])
+            self.ema.load_state_dict(state_dict['ema'], device=self.device)
             
         return state_dict.get('step', 0)
 
@@ -261,7 +261,7 @@ class D3DataModule(pl.LightningDataModule):
         return DataLoader(
             self.train_ds,
             batch_size=self.cfg.training.batch_size // (self.cfg.ngpus * self.cfg.training.accum),
-            num_workers=4,
+            num_workers=2,
             pin_memory=True,
             shuffle=True,
             persistent_workers=True,
@@ -272,7 +272,7 @@ class D3DataModule(pl.LightningDataModule):
         return DataLoader(
             self.val_ds,
             batch_size=self.cfg.eval.batch_size // (self.cfg.ngpus * self.cfg.training.accum),
-            num_workers=4,
+            num_workers=2,
             pin_memory=True,
             shuffle=False,
         )
@@ -404,7 +404,7 @@ def create_trainer_from_config(cfg, dataset_name: Optional[str] = None, **traine
         'precision': 'bf16-mixed',  # Use mixed precision like original
         'gradient_clip_val': cfg.optim.grad_clip if cfg.optim.grad_clip >= 0 else None,
         'enable_checkpointing': True,
-        'enable_progress_bar': False, #True
+        'enable_progress_bar': True,
         'enable_model_summary': True,
     }
     
@@ -419,49 +419,6 @@ def create_trainer_from_config(cfg, dataset_name: Optional[str] = None, **traine
     else:
         default_trainer_args['devices'] = 1
     
-    # Setup callbacks
-    callbacks = []
-    
-    # Add SP-MSE validation callback if enabled
-    if hasattr(cfg, 'sp_mse_validation') and cfg.sp_mse_validation.enabled:
-        from utils.sp_mse_callback import SPMSEValidationCallback
-        
-        # Auto-resolve paths if not provided
-        oracle_path = cfg.sp_mse_validation.oracle_path
-        data_path = cfg.sp_mse_validation.data_path
-        
-        if oracle_path is None and dataset_name:
-            oracle_files = {
-                'deepstarr': 'oracle_DeepSTARR_DeepSTARR_data.ckpt',
-                'mpra': 'oracle_mpra_mpra_data.ckpt',
-                'promoter': 'best.sei.model.pth.tar'
-            }
-            oracle_path = f"model_zoo/{dataset_name.lower()}/oracle_models/{oracle_files[dataset_name.lower()]}"
-        
-        if data_path is None and dataset_name:
-            data_files = {
-                'deepstarr': 'DeepSTARR_data.h5',
-                'mpra': 'mpra_data.h5',
-                'promoter': 'promoter_data.h5'
-            }
-            data_path = data_files[dataset_name.lower()]
-        
-        sp_mse_callback = SPMSEValidationCallback(
-            dataset=dataset_name or 'deepstarr',
-            oracle_path=oracle_path,
-            data_path=data_path,
-            validation_freq=cfg.sp_mse_validation.validation_freq,
-            validation_samples=cfg.sp_mse_validation.validation_samples,
-            enabled=cfg.sp_mse_validation.enabled,
-            sampling_steps=cfg.sp_mse_validation.sampling_steps,
-            early_stopping_patience=cfg.sp_mse_validation.early_stopping_patience
-        )
-        callbacks.append(sp_mse_callback)
-        print(f"✓ Added SP-MSE validation callback for {dataset_name} dataset")
-    
-    # Add callbacks to trainer args if any exist
-    if callbacks:
-        default_trainer_args['callbacks'] = callbacks
     
     # Override with any custom trainer arguments
     default_trainer_args.update(trainer_kwargs)

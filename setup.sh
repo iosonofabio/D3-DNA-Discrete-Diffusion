@@ -1,8 +1,9 @@
 #!/bin/bash
 
 ###SETUP ENVIRONMENT####
-# # Load modules
-module load cuda12.3/toolkit/12.3.2
+# Load modules
+# module load cuda12.3/toolkit/12.3.2
+module load cuda
 mamba init
 source ~/.bashrc
 
