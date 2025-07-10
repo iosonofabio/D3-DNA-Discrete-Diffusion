@@ -170,7 +170,7 @@ class D3LightningModule(pl.LightningModule):
         
         # Load EMA weights
         if 'ema' in loaded_state:
-            self.ema.load_state_dict(loaded_state['ema'])
+            self.ema.load_state_dict(loaded_state['ema'], device=self.device)
             print("✓ Loaded EMA weights from original checkpoint")
         
         # Load step counter for logging
@@ -218,7 +218,7 @@ class D3LightningModule(pl.LightningModule):
             # Load EMA state separately if it exists
             if ema_state and hasattr(self, 'ema'):
                 try:
-                    self.ema.load_state_dict(ema_state)
+                    self.ema.load_state_dict(ema_state, device=self.device)
                     print("✓ Loaded EMA state from Lightning checkpoint")
                 except Exception as e:
                     print(f"⚠ Could not load EMA state: {e}")
@@ -233,7 +233,7 @@ class D3LightningModule(pl.LightningModule):
         
         # Load EMA weights  
         if 'ema' in state_dict:
-            self.ema.load_state_dict(state_dict['ema'])
+            self.ema.load_state_dict(state_dict['ema'], device=self.device)
             
         return state_dict.get('step', 0)
 
@@ -261,7 +261,7 @@ class D3DataModule(pl.LightningDataModule):
         return DataLoader(
             self.train_ds,
             batch_size=self.cfg.training.batch_size // (self.cfg.ngpus * self.cfg.training.accum),
-            num_workers=4,
+            num_workers=2,
             pin_memory=True,
             shuffle=True,
             persistent_workers=True,
@@ -272,7 +272,7 @@ class D3DataModule(pl.LightningDataModule):
         return DataLoader(
             self.val_ds,
             batch_size=self.cfg.eval.batch_size // (self.cfg.ngpus * self.cfg.training.accum),
-            num_workers=4,
+            num_workers=2,
             pin_memory=True,
             shuffle=False,
         )
@@ -404,7 +404,7 @@ def create_trainer_from_config(cfg, dataset_name: Optional[str] = None, **traine
         'precision': 'bf16-mixed',  # Use mixed precision like original
         'gradient_clip_val': cfg.optim.grad_clip if cfg.optim.grad_clip >= 0 else None,
         'enable_checkpointing': True,
-        'enable_progress_bar': False, #True
+        'enable_progress_bar': True,
         'enable_model_summary': True,
     }
     

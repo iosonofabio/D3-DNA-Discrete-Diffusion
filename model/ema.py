@@ -49,6 +49,9 @@ class ExponentialMovingAverage:
         with torch.no_grad():
             parameters = [p for p in parameters if p.requires_grad]
             for s_param, param in zip(self.shadow_params, parameters):
+                # Ensure shadow parameter is on the same device as the model parameter
+                if s_param.device != param.device:
+                    s_param.data = s_param.data.to(param.device)
                 s_param.sub_(one_minus_decay * (s_param - param))
                 
 
@@ -63,6 +66,9 @@ class ExponentialMovingAverage:
         parameters = [p for p in parameters if p.requires_grad]
         for s_param, param in zip(self.shadow_params, parameters):
             if param.requires_grad:
+                # Ensure shadow parameter is on the same device as the model parameter
+                if s_param.device != param.device:
+                    s_param.data = s_param.data.to(param.device)
                 param.data.copy_(s_param.data)
 
     def store(self, parameters):
@@ -94,7 +100,12 @@ class ExponentialMovingAverage:
         return dict(decay=self.decay, num_updates=self.num_updates,
                     shadow_params=self.shadow_params)
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict, device=None):
         self.decay = state_dict['decay']
         self.num_updates = state_dict['num_updates']
         self.shadow_params = state_dict['shadow_params']
+        
+        # If device is specified, move shadow parameters to that device
+        if device is not None:
+            for i, shadow_param in enumerate(self.shadow_params):
+                self.shadow_params[i] = shadow_param.to(device)

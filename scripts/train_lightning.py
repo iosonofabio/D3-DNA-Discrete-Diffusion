@@ -50,11 +50,13 @@ def setup_logging(cfg, work_dir):
         config_dict = OmegaConf.to_yaml(cfg)
         
         wandb_logger = WandbLogger(
-            entity='54yyyu',
+            entity=cfg.wandb.get('entity', '54yyyu'),
             project=cfg.wandb.get('project', 'D3'),
             name=cfg.wandb.get('name', os.path.basename(work_dir)),
             save_dir=work_dir,
-            config=OmegaConf.to_container(cfg, resolve=True)  # Convert to plain dict
+            config=OmegaConf.to_container(cfg, resolve=True),  # Convert to plain dict
+            id=cfg.wandb.get('id', '2p7buc7r'),
+            resume=cfg.wandb.get('resume', 'must')
         )
         loggers.append(wandb_logger)
     
@@ -241,7 +243,7 @@ def main():
     data_module = D3DataModule(cfg, dataset_name=args.dataset)
     
     # Load from checkpoint if specified
-    resume_from_checkpoint = None
+    resume_from_checkpoint = "/insomnia001/home/yy3448/scratch/D3-DNA-Discrete-Diffusion/model_zoo/deepstarr/lightning_runs/Tran/lightning_checkpoints/last.ckpt"
     if args.resume_from:
         if os.path.exists(args.resume_from):
             model, original_step = load_from_checkpoint(args.resume_from, model, cfg, args.dataset)
@@ -267,8 +269,8 @@ def main():
     if args.fast_dev_run:
         trainer_kwargs['fast_dev_run'] = True
     
-    if resume_from_checkpoint:
-        trainer_kwargs['ckpt_path'] = resume_from_checkpoint
+    # if resume_from_checkpoint:
+    #     trainer_kwargs['ckpt_path'] = resume_from_checkpoint
     
     trainer = create_trainer_from_config(cfg, args.dataset, **trainer_kwargs)
     
@@ -294,7 +296,7 @@ def main():
     
     # Run training
     try:
-        trainer.fit(model, data_module)
+        trainer.fit(model, data_module,ckpt_path=resume_from_checkpoint)
         print("Training completed successfully!")
         
         # Save final model info

@@ -6,7 +6,7 @@ from utils import graph_lib
 from utils.utils import get_score_fn
 
 
-def get_loss_fn(noise, graph, train, sampling_eps=1e-3, lv=False, sc=False):
+def get_loss_fn(noise, graph, train, sampling_eps=1e-3, lv=False, sc=True):
 
     def loss_fn(model, batch, labels, cond=None, t=None, perturbed_batch=None):
         """
@@ -34,10 +34,14 @@ def get_loss_fn(noise, graph, train, sampling_eps=1e-3, lv=False, sc=False):
             t_dsigma = t/2 * curr_dsigma
             rev_rate = t_dsigma[..., None, None] * graph.reverse_rate(perturbed_batch, curr_score)
             x = graph.sample_rate(perturbed_batch, rev_rate)
-            next_sigma, next_dsigma = noise(sampling_eps)
+            
+            # Fix: Create sampling_eps tensor on the same device as batch
+            sampling_eps_tensor = torch.tensor(sampling_eps, device=batch.device)
+            next_sigma, next_dsigma = noise(sampling_eps_tensor)
             next_score = log_score_fn(x, labels, next_sigma)
-            t_dsigma_next = sampling_eps * next_dsigma
-            rev_rate_next = t_dsigma_next[..., None, None].to(batch.device) * graph.reverse_rate(x, next_score)
+            t_dsigma_next = sampling_eps_tensor * next_dsigma
+            rev_rate_next = t_dsigma_next[..., None, None] * graph.reverse_rate(x, next_score)
+            
             x_next = graph.sample_rate(x, rev_rate_next)
             l2_loss = ((batch - x_next)**2)
             mask = torch.rand(batch.shape[0], device=batch.device) < 0.25
