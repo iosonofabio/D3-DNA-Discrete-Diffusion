@@ -17,6 +17,65 @@ from utils import graph_lib
 from utils import noise_lib
 from utils.utils import get_score_fn
 
+from ray.train.torch import TorchTrainer
+from ray.train import ScalingConfig
+from ray.train.lightning import (
+    RayDDPStrategy,
+    RayLightningEnvironment,
+    RayTrainReportCallback,
+    prepare_trainer
+)
+
+
+# wrap PL code - each distributed worker executes this function
+def train_func(cfg, dataset_name: Optional[str] = None, config_path: Optional[str] = None):
+    
+    # create the lightning model
+    if dataset_name is None:
+        model = D3LightningModule(cfg, dataset_name)
+    else:
+        dataset_lower = dataset_name.lower()
+        if dataset_lower == 'promoter':
+            model = PromoterD3LightningModule(cfg)
+        elif dataset_lower == 'mpra':
+            model = MPRAD3LightningModule(cfg)
+        else:
+            model = D3LightningModule(cfg, dataset_name)
+
+    # TODO: report checpoint with callback
+
+    # Extract relevant training parameters
+    default_trainer_args = {
+        'max_steps': cfg.training.n_iters,
+        'log_every_n_steps': cfg.training.log_freq,
+        'val_check_interval': cfg.training. eval_freq,
+        'check_val_every_n_epoch': None,  # Allow step-based validation across epochs
+        'accumulate_grad_batches': cfg.training.accum,
+        'precision': 'bf16-mixed',  # Use mixed precision like original
+        'gradient_clip_val': cfg.optim.grad_clip if cfg.optim.grad_clip >= 0 else None,
+        'enable_checkpointing': True,
+        'enable_progress_bar': True,
+        'enable_model_summary': True,
+    }
+
+    # Create trainer
+    trainer = pl.Trainer(
+        devices="auto",
+        accelerator="auto",
+        strategy=RayDDPStrategy(),
+        callbacks=[RayTrainReportCallback()],
+        plugins=[RayLightningEnvironment()],
+        **default_trainer_args,
+    )
+
+    # validate PL trainer configs with external function
+    trainer = prepare_trainer(trainer)
+
+    # build datasets on each worker
+    dm = D3DataModule(cfg, dataset_name)
+    trainer.fit(model, datamodule=dm)
+
+
 
 class D3LightningModule(pl.LightningModule):
     """PyTorch Lightning module for D3 DNA Discrete Diffusion model."""
@@ -71,8 +130,8 @@ class D3LightningModule(pl.LightningModule):
             target = batch[:, :, 4:5]
         else:
             # For DeepSTARR and MPRA
-            inputs, target = batch
-            
+            inputs, target = batch           
+
         # Compute loss
         loss = self.loss_fn(self.score_model, inputs, target).mean()
         loss = loss / self.cfg.training.accum
@@ -315,6 +374,7 @@ def get_model_class_for_dataset(dataset: str, config_path: Optional[str] = None)
         return SEDD
 
 
+# NOTE: not used with RAY
 def create_lightning_module(cfg, dataset_name: Optional[str] = None, config_path: Optional[str] = None):
     """Factory function to create the appropriate Lightning module for the dataset."""
     if dataset_name is None:

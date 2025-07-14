@@ -155,7 +155,6 @@ def cycle_loader(dataloader, sampler=None):
             yield data
 
 
-
 def get_datasets(dataset='deepstarr'):
     """
     Get train and validation datasets without DataLoader wrapping.

@@ -9,12 +9,16 @@ import os
 import sys
 import argparse
 from pathlib import Path
+from functools import partial
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, EarlyStopping
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 import torch
 import numpy as np
+
+from ray.train import ScalingConfig, RunConfig, CheckpointConfig
+from ray.train.torch import TorchTrainer
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -25,7 +29,8 @@ from scripts.lightning_trainer import (
 )
 from utils.utils import load_hydra_config_from_run, makedirs, get_logger
 from utils.checkpoint_utils import is_original_checkpoint
-from utils.sp_mse_callback import SPMSEValidationCallback
+
+from scripts.lightning_trainer_ray import train_func
 
 
 def setup_logging(cfg, work_dir):
@@ -49,28 +54,19 @@ def setup_logging(cfg, work_dir):
         from omegaconf import OmegaConf
         config_dict = OmegaConf.to_yaml(cfg)
         
-        fraction = getattr(cfg.training, "data_fraction", 1.0)
-        fraction_str = f"frac{int(fraction*100)}" if fraction < 1.0 else "full"
-        basename = cfg.wandb.get('name', os.path.basename(work_dir))
-        # Use the work_dir name and append the fraction string
-        run_name = f"{basename}-{fraction_str}"
-
         wandb_logger = WandbLogger(
             entity=cfg.wandb.get("entity", None),
             project=cfg.wandb.get('project', 'D3'),
-            name=run_name,
+            name=cfg.wandb.get('name', os.path.basename(work_dir)),
             save_dir=work_dir,
-            config=OmegaConf.to_container(cfg, resolve=True),
-            # id=cfg.wandb.get('id', '2p7buc7r'),
-            # resume=cfg.wandb.get('resume', 'must'),
+            config=OmegaConf.to_container(cfg, resolve=True)  # Convert to plain dict
         )
-        
         loggers.append(wandb_logger)
     
     return loggers
 
 
-def setup_callbacks(cfg, work_dir, dataset_name=None):
+def setup_callbacks(cfg, work_dir):
     """Setup Lightning callbacks."""
     callbacks = []
     
@@ -101,52 +97,7 @@ def setup_callbacks(cfg, work_dir, dataset_name=None):
         )
         callbacks.append(early_stopping)
     
-    # SP-MSE validation callback (optional)
-    sp_mse_callback = setup_sp_mse_callback(cfg, dataset_name)
-    if sp_mse_callback:
-        callbacks.append(sp_mse_callback)
-    
     return callbacks
-
-
-def setup_sp_mse_callback(cfg, dataset_name):
-    """Setup SP-MSE validation callback if enabled."""
-    if not hasattr(cfg, 'sp_mse_validation') or not cfg.sp_mse_validation.enabled:
-        return None
-    
-    # Auto-resolve paths if not provided
-    oracle_path = cfg.sp_mse_validation.oracle_path
-    data_path = cfg.sp_mse_validation.data_path
-    
-    if oracle_path is None and dataset_name:
-        oracle_files = {
-            'deepstarr': 'oracle_DeepSTARR_DeepSTARR_data.ckpt',
-            'mpra': 'oracle_mpra_mpra_data.ckpt',
-            'promoter': 'best.sei.model.pth.tar'
-        }
-        oracle_path = f"model_zoo/{dataset_name.lower()}/oracle_models/{oracle_files[dataset_name.lower()]}"
-    
-    if data_path is None and dataset_name:
-        data_files = {
-            'deepstarr': 'DeepSTARR_data.h5',
-            'mpra': 'mpra_data.h5',
-            'promoter': 'promoter_data.h5'
-        }
-        data_path = data_files[dataset_name.lower()]
-    
-    sp_mse_callback = SPMSEValidationCallback(
-        dataset=dataset_name or 'deepstarr',
-        oracle_path=oracle_path,
-        data_path=data_path,
-        validation_freq=cfg.sp_mse_validation.validation_freq,
-        validation_samples=cfg.sp_mse_validation.validation_samples,
-        enabled=cfg.sp_mse_validation.enabled,
-        sampling_steps=cfg.sp_mse_validation.sampling_steps,
-        early_stopping_patience=cfg.sp_mse_validation.early_stopping_patience
-    )
-    
-    print(f"✓ Added SP-MSE validation callback for {dataset_name} dataset")
-    return sp_mse_callback
 
 
 def load_from_checkpoint(checkpoint_path, model, cfg, dataset_name):
@@ -266,41 +217,65 @@ def main():
         pl.seed_everything(42)
     
     # Initialize model and data module using factory pattern
-    model = create_lightning_module(cfg, dataset_name=args.dataset, config_path=args.config_path)
-    data_module = D3DataModule(cfg, dataset_name=args.dataset)
+    # model = create_lightning_module(cfg, dataset_name=args.dataset, config_path=args.config_path)
+    # data_module = D3DataModule(cfg, dataset_name=args.dataset)
     
-    # Load from checkpoint if specified
-    resume_from_checkpoint = None
-    if args.resume_from:
-        if os.path.exists(args.resume_from):
-            model, original_step = load_from_checkpoint(args.resume_from, model, cfg, args.dataset)
-            if original_step:
-                print(f"Resuming from step: {original_step}")
-            # For Lightning checkpoints, we'll use the built-in resume mechanism
-            if not is_original_checkpoint(args.resume_from):
-                resume_from_checkpoint = args.resume_from
-        else:
-            print(f"Warning: Checkpoint {args.resume_from} not found")
+    # # Load from checkpoint if specified
+    # resume_from_checkpoint = None
+    # if args.resume_from:
+    #     if os.path.exists(args.resume_from):
+    #         model, original_step = load_from_checkpoint(args.resume_from, model, cfg, args.dataset)
+    #         if original_step:
+    #             print(f"Resuming from step: {original_step}")
+    #         # For Lightning checkpoints, we'll use the built-in resume mechanism
+    #         if not is_original_checkpoint(args.resume_from):
+    #             resume_from_checkpoint = args.resume_from
+    #     else:
+    #         print(f"Warning: Checkpoint {args.resume_from} not found")
     
     # Setup loggers and callbacks
     loggers = setup_logging(cfg, work_dir)
-    callbacks = setup_callbacks(cfg, work_dir, args.dataset)
+    callbacks = setup_callbacks(cfg, work_dir)
     
-    # Create trainer
-    trainer_kwargs = {
-        'logger': loggers,
-        'callbacks': callbacks,
-        'default_root_dir': work_dir,
-    }
+    # # Create trainer
+    # trainer_kwargs = {
+    #     'logger': loggers,
+    #     'callbacks': callbacks,
+    #     'default_root_dir': work_dir,
+    # }
     
-    if args.fast_dev_run:
-        trainer_kwargs['fast_dev_run'] = True
+    # if args.fast_dev_run:
+    #     trainer_kwargs['fast_dev_run'] = True
     
     # if resume_from_checkpoint:
     #     trainer_kwargs['ckpt_path'] = resume_from_checkpoint
     
-    trainer = create_trainer_from_config(cfg, args.dataset, **trainer_kwargs)
+    # trainer = create_trainer_from_config(cfg, args.dataset, **trainer_kwargs)
+    train_func_with_args = partial(train_func, cfg, args.dataset, args.config_path)
     
+    # cpus = cpus available
+    num_cpus = os.cpu_count()
+
+    # explicitly define and run the TorchTrainer (Ray interface)
+    trainer = TorchTrainer(
+        train_func_with_args,
+        scaling_config=ScalingConfig(
+            num_workers=4,
+            resources_per_worker={"cpu": num_cpus, "gpu": cfg.ngpus}),
+        run_config=RunConfig(
+            name=f"d3-{args.dataset}-{args.arch}-{args.fraction_data}",
+            storage_path=os.path.join(work_dir, "lightning_checkpoints"),
+            checkpoint_config=CheckpointConfig(
+                num_to_keep=3,
+                checkpoint_frequency=cfg.training.snapshot_freq,
+                checkpoint_at_end=True,
+                checkpoint_score_attribute="val_loss",
+                checkpoint_score_order="min",
+            )
+        )
+    )
+
+
     # Print training info
     print("\n" + "="*50)
     print("TRAINING CONFIGURATION")
@@ -325,12 +300,11 @@ def main():
     
     # Run training
     try:
-        trainer.fit(model, data_module,ckpt_path=resume_from_checkpoint)
+        trainer.fit()
         print("Training completed successfully!")
         
-        # Save final model info
-        final_checkpoint = trainer.checkpoint_callback.best_model_path
-        print(f"Best model saved at: {final_checkpoint}")
+        # Training completed successfully
+        print("Training completed successfully!")
         
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")

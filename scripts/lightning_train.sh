@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --job-name=d3-dna-diffusion
-#SBATCH --output=d3-dna-diffusion.out
-#SBATCH --error=d3-dna-diffusion.err
+#SBATCH --output=d3-dna-diffusion-try-frac.out
+#SBATCH --error=d3-dna-diffusion-try-frac.err
 #SBATCH --time=24:00:00
 #SBATCH --partition=gpuq
 #SBATCH --gres=gpu:h100:2
@@ -21,4 +21,4 @@ cd ~/scratch/D3-DNA-Discrete-Diffusion
 
 # srun --partition=gpuq --qos=bio_ai --mem=64G --time=48:00:00 --gres=gpu:h100:2 --pty /bin/bash
 
-python scripts/train_lightning.py --dataset deepstarr --arch Tran # --config model_zoo/deepstarr/config/Tran/hydra/config.yaml
+python scripts/train_lightning.py --dataset deepstarr --arch Tran --gpus 2 --fraction_data 0.75 # --config model_zoo/deepstarr/config/Tran/hydra/config.yaml
