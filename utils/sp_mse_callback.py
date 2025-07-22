@@ -1,27 +1,26 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-import sys
 import os
-from typing import Optional, Any
+from typing import Optional, Any, Tuple
+from abc import ABC, abstractmethod
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning import LightningModule, Trainer
 
 from scripts import sampling
 
 
-class SPMSEValidationCallback(Callback):
+class BaseSPMSEValidationCallback(Callback, ABC):
     """
-    Callback for evaluating generated sequences using oracle models and computing SP-MSE.
+    Base callback for evaluating generated sequences using oracle models and computing SP-MSE.
     
-    This callback generates sequences from the diffusion model during training,
-    evaluates them using oracle models, and computes MSE between oracle predictions
-    on real vs generated sequences. Saves checkpoints based on best SP-MSE performance.
+    This base class provides common functionality for SP-MSE validation during training.
+    Dataset-specific implementations should inherit from this class and implement
+    the abstract methods.
     """
     
     def __init__(
         self,
-        dataset: str,
         oracle_path: str,
         data_path: str,
         validation_freq: int = 5000,
@@ -32,7 +31,6 @@ class SPMSEValidationCallback(Callback):
     ):
         """
         Args:
-            dataset: Dataset name ('deepstarr', 'mpra', 'promoter')
             oracle_path: Path to oracle model checkpoint
             data_path: Path to dataset file
             validation_freq: Frequency in training steps to run SP-MSE validation
@@ -42,7 +40,6 @@ class SPMSEValidationCallback(Callback):
             early_stopping_patience: Stop training if no improvement for N validations
         """
         super().__init__()
-        self.dataset = dataset.lower()
         self.oracle_path = oracle_path
         self.data_path = data_path
         self.validation_freq = validation_freq
@@ -57,28 +54,49 @@ class SPMSEValidationCallback(Callback):
         self.steps_since_improvement = 0
         self.validation_data_cache = None
         
-        # Sequence lengths for different datasets
-        self.seq_lengths = {
-            'deepstarr': 249,
-            'mpra': 200,
-            'promoter': 1024
-        }
-        
         if not self.enabled:
             return
-            
-        # Auto-resolve oracle path if relative
-        if not os.path.isabs(self.oracle_path):
-            oracle_files = {
-                'deepstarr': 'oracle_DeepSTARR_DeepSTARR_data.ckpt',
-                'mpra': 'oracle_mpra_mpra_data.ckpt',
-                'promoter': 'best.sei.model.pth.tar'
-            }
-            self.oracle_path = f"model_zoo/{self.dataset}/oracle_models/{oracle_files[self.dataset]}"
         
-        # Set default sampling steps
+        # Set default sampling steps if not provided
         if self.sampling_steps is None:
-            self.sampling_steps = self.seq_lengths.get(self.dataset, 249)
+            self.sampling_steps = self.get_default_sampling_steps()
+    
+    @abstractmethod
+    def get_default_sampling_steps(self) -> int:
+        """Get default sampling steps for this dataset."""
+        pass
+    
+    @abstractmethod
+    def load_oracle_model(self):
+        """Load the oracle model. Must be implemented by subclasses."""
+        pass
+    
+    @abstractmethod
+    def get_oracle_predictions(self, sequences: torch.Tensor, device: torch.device) -> torch.Tensor:
+        """
+        Get oracle predictions for sequences.
+        
+        Args:
+            sequences: Input sequences (format depends on implementation)
+            device: Device to run on
+            
+        Returns:
+            Oracle predictions
+        """
+        pass
+    
+    @abstractmethod
+    def process_batch(self, batch) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Process batch data into sequences and targets.
+        
+        Args:
+            batch: Raw batch data
+            
+        Returns:
+            Tuple of (sequences, targets)
+        """
+        pass
     
     def setup(self, trainer: Trainer, pl_module: LightningModule, stage: str) -> None:
         """Setup callback - load oracle model"""
@@ -86,7 +104,7 @@ class SPMSEValidationCallback(Callback):
             return
             
         if stage == 'fit':
-            self.oracle_model = self._load_oracle_model()
+            self.oracle_model = self.load_oracle_model()
             if self.oracle_model is not None:
                 self.oracle_model.eval()
                 print(f"SP-MSE Callback: Loaded oracle model from {self.oracle_path}")
@@ -112,40 +130,6 @@ class SPMSEValidationCallback(Callback):
         if global_step > 0 and global_step % self.validation_freq == 0:
             self._run_sp_mse_validation(trainer, pl_module)
     
-    def _load_oracle_model(self):
-        """Load the appropriate oracle model based on dataset"""
-        try:
-            if self.dataset == 'deepstarr':
-                sys.path.insert(0, 'model_zoo/deepstarr')
-                try:
-                    from deepstarr import PL_DeepSTARR
-                    oracle = PL_DeepSTARR.load_from_checkpoint(
-                        self.oracle_path, input_h5_file=self.data_path
-                    ).eval()
-                    return oracle
-                finally:
-                    sys.path.pop(0)
-                    
-            elif self.dataset == 'mpra':
-                sys.path.insert(0, 'model_zoo/mpra')
-                try:
-                    from mpra import PL_mpra
-                    oracle = PL_mpra.load_from_checkpoint(
-                        self.oracle_path, input_h5_file=self.data_path
-                    ).eval()
-                    return oracle
-                finally:
-                    sys.path.pop(0)
-                    
-            elif self.dataset == 'promoter':
-                raise NotImplementedError("Promoter evaluation requires SEI model setup")
-            else:
-                raise ValueError(f"Unknown dataset: {self.dataset}")
-                
-        except Exception as e:
-            print(f"Failed to load oracle model: {e}")
-            return None
-    
     def _get_validation_data(self, trainer: Trainer):
         """Get validation data with optional subsampling"""
         if self.validation_data_cache is not None:
@@ -159,7 +143,7 @@ class SPMSEValidationCallback(Callback):
         all_targets = []
         
         for batch in val_dataloader:
-            sequences, targets = batch
+            sequences, targets = self.process_batch(batch)
             all_sequences.append(sequences)
             all_targets.append(targets)
         
@@ -184,7 +168,7 @@ class SPMSEValidationCallback(Callback):
         val_targets = val_targets.to(device)
         
         # Get sequence length
-        seq_length = self.seq_lengths.get(self.dataset, 249)
+        seq_length = self.get_default_sampling_steps()
         
         # Initialize sampling function
         sampling_fn = sampling.get_pc_sampler(
@@ -207,21 +191,21 @@ class SPMSEValidationCallback(Callback):
             try:
                 # Generate samples
                 generated_sequences = sampling_fn(pl_module.score_model, val_targets)
-                generated_one_hot = F.one_hot(generated_sequences, num_classes=4).float()
                 
                 # Get oracle predictions
-                val_score = self._get_oracle_predictions(val_sequences, device)
-                generated_score = self._get_oracle_predictions_from_one_hot(generated_one_hot, device)
+                val_score = self.get_oracle_predictions(val_sequences, device)
+                generated_score = self.get_oracle_predictions(generated_sequences, device)
                 
                 # Calculate SP-MSE
                 sp_mse = (val_score - generated_score) ** 2
                 mean_sp_mse = torch.mean(sp_mse).cpu().item()
                 
                 # Log metrics
-                trainer.logger.log_metrics({
-                    'sp_mse/validation': mean_sp_mse,
-                    'sp_mse/best': self.best_sp_mse
-                }, step=trainer.global_step)
+                if trainer.logger:
+                    trainer.logger.log_metrics({
+                        'sp_mse/validation': mean_sp_mse,
+                        'sp_mse/best': self.best_sp_mse
+                    }, step=trainer.global_step)
                 
                 print(f"Step {trainer.global_step}: SP-MSE = {mean_sp_mse:.6f}, Best = {self.best_sp_mse:.6f}")
                 
@@ -255,24 +239,3 @@ class SPMSEValidationCallback(Callback):
                 # Restore training mode
                 if was_training:
                     pl_module.train()
-    
-    def _get_oracle_predictions(self, sequences, device):
-        """Get oracle predictions for sequences"""
-        if self.dataset in ['deepstarr', 'mpra']:
-            # Convert sequences to one-hot if needed
-            if sequences.dtype == torch.long:
-                sequences_one_hot = F.one_hot(sequences, num_classes=4).float()
-            else:
-                sequences_one_hot = sequences
-            
-            # Get oracle predictions
-            return self.oracle_model.predict_custom(sequences_one_hot.permute(0, 2, 1).to(device))
-        else:
-            raise NotImplementedError(f"Oracle predictions not implemented for dataset: {self.dataset}")
-    
-    def _get_oracle_predictions_from_one_hot(self, sequences_one_hot, device):
-        """Get oracle predictions from one-hot encoded sequences"""
-        if self.dataset in ['deepstarr', 'mpra']:
-            return self.oracle_model.predict_custom(sequences_one_hot.permute(0, 2, 1).to(device))
-        else:
-            raise NotImplementedError(f"Oracle predictions not implemented for dataset: {self.dataset}")

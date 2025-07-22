@@ -16,6 +16,7 @@ from pathlib import Path
 from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args
 from model_zoo.promoter.models import create_model
 from model_zoo.promoter.data import get_promoter_datasets, get_promoter_dataloaders
+from model_zoo.promoter.sp_mse_callback import create_promoter_sp_mse_callback
 from omegaconf import OmegaConf
 import torch
 
@@ -88,6 +89,17 @@ class PromoterTrainer(BaseTrainer):
     def create_data_module(self):
         """Create Promoter data module."""
         return PromoterDataModule(self.cfg)
+    
+    def setup_callbacks(self):
+        """Setup training callbacks including dataset-specific SP-MSE callback."""
+        callbacks = super().setup_callbacks()
+        
+        # Add Promoter-specific SP-MSE callback if enabled
+        sp_mse_callback = create_promoter_sp_mse_callback(self.cfg)
+        if sp_mse_callback is not None:
+            callbacks.append(sp_mse_callback)
+        
+        return callbacks
 
 
 def main():

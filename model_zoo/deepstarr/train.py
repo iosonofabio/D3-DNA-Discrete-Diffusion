@@ -16,6 +16,7 @@ from pathlib import Path
 from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args
 from model_zoo.deepstarr.models import create_model
 from model_zoo.deepstarr.data import get_deepstarr_datasets, get_deepstarr_dataloaders
+from model_zoo.deepstarr.sp_mse_callback import create_deepstarr_sp_mse_callback
 from omegaconf import OmegaConf
 
 
@@ -77,6 +78,17 @@ class DeepSTARRTrainer(BaseTrainer):
     def create_data_module(self):
         """Create DeepSTARR data module."""
         return DeepSTARRDataModule(self.cfg)
+    
+    def setup_callbacks(self):
+        """Setup training callbacks including dataset-specific SP-MSE callback."""
+        callbacks = super().setup_callbacks()
+        
+        # Add DeepSTARR-specific SP-MSE callback if enabled
+        sp_mse_callback = create_deepstarr_sp_mse_callback(self.cfg)
+        if sp_mse_callback is not None:
+            callbacks.append(sp_mse_callback)
+        
+        return callbacks
 
 
 def main():

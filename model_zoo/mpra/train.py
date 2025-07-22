@@ -16,6 +16,7 @@ from pathlib import Path
 from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args
 from model_zoo.mpra.models import create_model
 from model_zoo.mpra.data import get_mpra_datasets, get_mpra_dataloaders
+from model_zoo.mpra.sp_mse_callback import create_mpra_sp_mse_callback
 from omegaconf import OmegaConf
 
 
@@ -77,6 +78,17 @@ class MPRATrainer(BaseTrainer):
     def create_data_module(self):
         """Create MPRA data module."""
         return MPRADataModule(self.cfg)
+    
+    def setup_callbacks(self):
+        """Setup training callbacks including dataset-specific SP-MSE callback."""
+        callbacks = super().setup_callbacks()
+        
+        # Add MPRA-specific SP-MSE callback if enabled
+        sp_mse_callback = create_mpra_sp_mse_callback(self.cfg)
+        if sp_mse_callback is not None:
+            callbacks.append(sp_mse_callback)
+        
+        return callbacks
 
 
 def main():

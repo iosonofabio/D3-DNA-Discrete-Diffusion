@@ -1,7 +1,7 @@
 # DeepSTARR Dataset - Transformer Architecture Configuration
 dataset:
   name: deepstarr
-  data_file: DeepSTARR_data.h5
+  data_file: model_zoo/deepstarr/DeepSTARR_data.h5
   sequence_length: 249
   num_classes: 4
   signal_dim: 2

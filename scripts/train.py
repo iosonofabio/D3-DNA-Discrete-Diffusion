@@ -31,7 +31,6 @@ from utils import graph_lib
 from utils import noise_lib
 from utils.utils import get_score_fn, load_hydra_config_from_run, makedirs, get_logger
 from utils.checkpoint_utils import is_original_checkpoint
-from utils.sp_mse_callback import SPMSEValidationCallback
 
 
 class BaseD3LightningModule(pl.LightningModule):
@@ -421,13 +420,7 @@ class BaseTrainer:
             )
             callbacks.append(early_stop)
             
-        # SP-MSE callback if specified
-        if hasattr(self.cfg, 'sp_mse') and self.cfg.sp_mse.get('enabled', False):
-            sp_mse_callback = SPMSEValidationCallback(
-                cfg=self.cfg,
-                dataset_name=self.dataset_name
-            )
-            callbacks.append(sp_mse_callback)
+# SP-MSE callbacks are now handled by dataset-specific trainers
         
         return callbacks
     
