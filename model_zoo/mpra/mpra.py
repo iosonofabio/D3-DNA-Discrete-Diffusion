@@ -1,222 +1,278 @@
+"""
+MPRA Oracle Model for MPRA Dataset
+
+This module contains the MPRA (Massively Parallel Reporter Assay) model architecture.
+This is the oracle model used for evaluation against D3 generated sequences for MPRA data.
+
+The model predicts regulatory activity from DNA sequences using a convolutional neural network
+with dilated residual blocks for capturing long-range dependencies.
+"""
+
 import torch
 from torch import nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
+import torch.optim as optim
 
-import os, h5py
+import os
+import h5py
 import numpy as np
 import copy
 import re
 import tqdm
 from scipy import stats
 import torch.utils.data as data_utils
+import random
+from typing import Any, Dict, Optional
+from sklearn.metrics import roc_auc_score, average_precision_score
+from pytorch_lightning import loggers as pl_loggers
+from filelock import FileLock
 
-class dilated_residual(pl.LightningModule):
-    def __init__(self, filter_num, kernel_size, dilation_rate, dropout):
+class DilatedResidual(pl.LightningModule):
+    """Dilated residual block for capturing long-range dependencies.
+    
+    Args:
+        filter_num: Number of filters
+        kernel_size: Size of convolutional kernels
+        dilation_rate: List of dilation rates for each layer
+        dropout: Dropout probability
+    """
+    
+    def __init__(self, filter_num: int, kernel_size: int, 
+                 dilation_rate: list, dropout: float):
         super().__init__()
         layers = []
         layers.append(nn.Conv1d(filter_num, filter_num, kernel_size, padding='same'))
         layers.append(nn.BatchNorm1d(filter_num))
-        for i in range(0, len(dilation_rate)):
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(dropout))
-            layers.append(nn.Conv1d(filter_num, filter_num, kernel_size, stride=1,
-                                    padding='same', dilation=dilation_rate[i], bias=False))
-            layers.append(nn.BatchNorm1d(filter_num))
+        
+        for dilation in dilation_rate:
+            layers.extend([
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Conv1d(filter_num, filter_num, kernel_size, stride=1,
+                         padding='same', dilation=dilation, bias=False),
+                nn.BatchNorm1d(filter_num)
+            ])
+            
         self.block = nn.Sequential(*layers)
         self.output_act = nn.ReLU()
 
     def forward(self, x):
+        """Forward pass with residual connection."""
         out = self.block(x)
         residual = torch.add(out, x)
         output = self.output_act(residual)
         return output
 
-class mpra(nn.Module):
-    def __init__(self, output_dim): #exp_num, lr,
+class MPRA(nn.Module):
+    """MPRA model architecture for regulatory activity prediction.
+    
+    This model uses convolutional layers with dilated residual blocks
+    to predict regulatory activity from DNA sequences.
+    
+    Args:
+        output_dim: Number of output dimensions (typically 1 for MPRA)
+    """
+    
+    def __init__(self, output_dim: int):
         super().__init__()
-        # self.lr = lr
-        self.conv1 = nn.Sequential(*[
+        
+        # First convolutional block
+        self.conv1 = nn.Sequential(
             nn.Conv1d(4, 196, 15, padding='same'),
             nn.BatchNorm1d(196),
             nn.ELU(),
             nn.Dropout(0.1)
-        ])
-        self.res1 = nn.Sequential(*[
-            dilated_residual(196, 3, [1, 2, 4, 8], 0.1),
+        )
+        
+        # First residual block
+        self.res1 = nn.Sequential(
+            DilatedResidual(196, 3, [1, 2, 4, 8], 0.1),
             nn.MaxPool1d(4),
             nn.Dropout(0.2)
-        ])
-        self.conv2 = nn.Sequential(*[
+        )
+        
+        # Second convolutional block
+        self.conv2 = nn.Sequential(
             nn.Conv1d(196, 256, 5, padding='same'),
             nn.BatchNorm1d(256),
             nn.ReLU(),
             nn.Dropout(0.1)
-        ])
-        self.res2 = nn.Sequential(*[
-            dilated_residual(256, 3, [1, 2, 4], 0.1),
+        )
+        
+        # Second residual block
+        self.res2 = nn.Sequential(
+            DilatedResidual(256, 3, [1, 2, 4], 0.1),
             nn.MaxPool1d(4),
             nn.Dropout(0.2)
-        ])
-        self.conv3 = nn.Sequential(*[
+        )
+        
+        # Third convolutional block
+        self.conv3 = nn.Sequential(
             nn.Conv1d(256, 256, 3, padding='same'),
             nn.BatchNorm1d(256),
             nn.ReLU(),
             nn.Dropout(0.1)
-        ])
-        self.res3 = nn.Sequential(*[
-            dilated_residual(256, 3, [1], 0.1),
+        )
+        
+        # Third residual block
+        self.res3 = nn.Sequential(
+            DilatedResidual(256, 3, [1], 0.1),
             nn.MaxPool1d(2),
             nn.Dropout(0.2)
-        ])
-
+        )
+        
+        # Fully connected layers
         self.activation = nn.ReLU()
         self.dropout4 = nn.Dropout(0.5)
         self.flatten = nn.Flatten()
-
-        # Layer 6 (fully connected), constituent parts
+        
         self.fc4 = nn.LazyLinear(512, bias=True)
         self.batchnorm4 = nn.BatchNorm1d(512)
-
-        # Layer 5 (fully connected), constituent parts
+        
         self.fc5 = nn.LazyLinear(256, bias=True)
         self.batchnorm5 = nn.BatchNorm1d(256)
-
-        # Output layer (fully connected), constituent parts
+        
+        # Output layer
         self.fc6 = nn.Linear(256, output_dim)
 
     def forward(self, x):
-        nn = self.conv1(x)
-        nn = self.res1(nn)
-
-        # Layer 2
-        nn = self.conv2(nn)
-        nn = self.res2(nn)
-
-        # Layer 3
-        nn = self.conv3(nn)
-        nn = self.res3(nn)
-
-        # Layer 4
-        cnn = self.flatten(nn)
-        cnn = self.fc4(cnn)
-        cnn = self.batchnorm4(cnn)
-        cnn = self.activation(cnn)
-        cnn = self.dropout4(cnn)
-
-        # Layer 5
-        cnn = self.fc5(cnn)
-        cnn = self.batchnorm5(cnn)
-        cnn = self.activation(cnn)
-        cnn = self.dropout4(cnn)
-
-        # Output layer
-        y_pred = self.fc6(cnn)
-
+        """Forward pass through the MPRA model.
+        
+        Args:
+            x: Input tensor of shape (batch_size, 4, sequence_length)
+            
+        Returns:
+            Predicted regulatory activity scores
+        """
+        # Convolutional layers with residual blocks
+        x = self.conv1(x)
+        x = self.res1(x)
+        
+        x = self.conv2(x)
+        x = self.res2(x)
+        
+        x = self.conv3(x)
+        x = self.res3(x)
+        
+        # Fully connected layers
+        x = self.flatten(x)
+        
+        x = self.fc4(x)
+        x = self.batchnorm4(x)
+        x = self.activation(x)
+        x = self.dropout4(x)
+        
+        x = self.fc5(x)
+        x = self.batchnorm5(x)
+        x = self.activation(x)
+        x = self.dropout4(x)
+        
+        # Output
+        y_pred = self.fc6(x)
         return y_pred
 
 
-#################
+# =============================================================================
+# PyTorch Lightning Integration
+# =============================================================================
 
-
-from typing import Any
-from pytorch_lightning.utilities.types import EVAL_DATALOADERS
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from sklearn.metrics import roc_auc_score, average_precision_score
-# import tqdm
-import numpy as np
-import random
-import h5py
-import os
-from scipy import stats
-
-import pytorch_lightning as pl
-# from lightning.pytorch import loggers as pl_loggers
-from pytorch_lightning import loggers as pl_loggers
-# import deepstarr_model
-# import deepstarr_model_with_init
-import tqdm
-
-
-# import torchsummary
-
-def get_github_main_directory(reponame='DALdna'):
+def get_github_main_directory(reponame: str = 'DALdna') -> str:
+    """Get the main directory path for the given repository name."""
     currdir = os.getcwd()
-    dir = ''
+    dir_path = ''
     for dirname in currdir.split('/'):
-        dir += dirname + '/'
-        if dirname == reponame: break
-    return dir
+        dir_path += dirname + '/'
+        if dirname == reponame:
+            break
+    return dir_path
 
 
-def key_with_low(key_list, low):
+def key_with_low(key_list: list, low: str) -> str:
+    """Find key in list that matches lowercase string."""
     the_key = ''
     for key in key_list:
-        if key.lower() == low: the_key = key
+        if key.lower() == low:
+            the_key = key
     return the_key
 
 
-from filelock import FileLock
-
-
-class PL_mpra(pl.LightningModule):
+class PL_MPRA(pl.LightningModule):
+    """PyTorch Lightning wrapper for MPRA model.
+    
+    This class provides training, validation, and testing functionality
+    for the MPRA oracle model used in D3 evaluations.
+    """
+    
     def __init__(self,
-                 batch_size=128,  # original: 128, #20, #50, #100, #128,
-                 train_max_epochs=100,  # my would-be-choice: 50,
-                 patience=10,  # 10, #100, #20, #patience=10,
-                 min_delta=0.001,  # min_delta=0.001,
-                 input_h5_file='mpra_tewhey.h5',  # Originally created as: cp Orig_DeepSTARR_1dim.h5 DeepSTARRdev.h5
-                 lr=0.002,  # most likely: 0.001, #0.002 From Paper
-                 initial_ds=True,
-
-                 weight_decay=1e-6,
-                 # 1e-6, #1e-6, #0.0, #1e-6, #Stage0 # WEIGHT DECAY: L2 penalty: https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
-                 min_lr=0.0,
-                 # default when not present (configure_optimizer in evoaug_analysis_utils_AC.py)                                                     #DSRR
-                 lr_patience=10,  # 1, #2 #,100, #10, #5
-                 decay_factor=0.1,  # 0.0 #0.1, #Stage0
-
-                 scale=0.005,  # 0.001 or 0.005 according to Chandana
-
-                 initialization='kaiming_uniform',  # original: 'kaiming_normal', #AC
-                 initialize_dense=False,
-                 ):
+                 batch_size: int = 128,
+                 train_max_epochs: int = 100,
+                 patience: int = 10,
+                 min_delta: float = 0.001,
+                 input_h5_file: str = 'mpra_tewhey.h5',
+                 lr: float = 0.002,
+                 initial_ds: bool = True,
+                 weight_decay: float = 1e-6,
+                 min_lr: float = 0.0,
+                 lr_patience: int = 10,
+                 decay_factor: float = 0.1,
+                 scale: float = 0.005,
+                 initialization: str = 'kaiming_uniform',
+                 initialize_dense: bool = False):
         super().__init__()
+        self.save_hyperparameters()
+        
+        # Model configuration
         self.scale = scale
-        self.model = mpra(output_dim=1)  # , initialization=initialization, initialize_dense=initialize_dense) #.to(device) #goodold
+        self.model = MPRA(output_dim=1)
         self.name = 'mpra'
-        # self.task_type='single_task_regression'
         self.metric_names = ['PCC', 'Spearman']
         self.initial_ds = initial_ds
-
+        
+        # Training configuration
         self.batch_size = batch_size
         self.train_max_epochs = train_max_epochs
         self.patience = patience
         self.lr = lr
-        self.min_delta = min_delta  # for trainer, but accessible as an attribute if needed                                                     #DSRR
+        self.min_delta = min_delta
         self.weight_decay = weight_decay
-
-        # ""
         self.min_lr = min_lr
         self.lr_patience = lr_patience
         self.decay_factor = decay_factor
-        # ""
-
+        
+        # Data configuration
         self.input_h5_file = input_h5_file
+        # Load data
         data = h5py.File(input_h5_file, 'r')
         if initial_ds:
-            self.X_train = torch.tensor(np.array(data['x_train']).astype(np.float32)).permute(0,2,1)  # (402278, 4, 249)
-            self.y_train = torch.tensor(np.array(data['y_train']).astype(np.float32))[:, 2].unsqueeze(1)
-            self.X_test = torch.tensor(np.array(data['x_test']).astype(np.float32)).permute(0,2,1)
-            self.y_test = torch.tensor(np.array(data['y_test']).astype(np.float32))[:, 2].unsqueeze(1)
-            self.X_valid = torch.tensor(np.array(data['x_valid']).astype(np.float32)).permute(0,2,1)
-            self.y_valid = torch.tensor(np.array(data['y_valid']).astype(np.float32))[:, 2].unsqueeze(1)                                                     #DSRR
+            # Load and preprocess training data
+            self.X_train = torch.tensor(
+                np.array(data['x_train']).astype(np.float32)
+            ).permute(0, 2, 1)
+            self.y_train = torch.tensor(
+                np.array(data['y_train']).astype(np.float32)
+            )[:, 2].unsqueeze(1)
+            
+            # Load and preprocess test data
+            self.X_test = torch.tensor(
+                np.array(data['x_test']).astype(np.float32)
+            ).permute(0, 2, 1)
+            self.y_test = torch.tensor(
+                np.array(data['y_test']).astype(np.float32)
+            )[:, 2].unsqueeze(1)
+            
+            # Load and preprocess validation data
+            self.X_valid = torch.tensor(
+                np.array(data['x_valid']).astype(np.float32)
+            ).permute(0, 2, 1)
+            self.y_valid = torch.tensor(
+                np.array(data['y_valid']).astype(np.float32)
+            )[:, 2].unsqueeze(1)
+            
             self.X_test2 = self.X_test
             self.y_test2 = self.y_test
         else:
+            # Use raw data without preprocessing
             self.X_train = data['x_train']
             self.y_train = data['y_train']
             self.X_test = data['x_test']
@@ -226,238 +282,328 @@ class PL_mpra(pl.LightningModule):
             self.X_valid = data['x_valid']
             self.y_valid = data['y_valid']
 
-    # ""
-    def training_step(self, batch, batch_idx):  # QUIQUIURG
+    def training_step(self, batch, batch_idx):
+        """Training step for one batch."""
         self.model.train()
         inputs, labels = batch
-        loss_fn = nn.MSELoss()  # .to(device)
-        outputs = self.model(inputs)
-        loss = loss_fn(outputs, labels)  # DSRR
-
-        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)  # DSRR
-
-        return loss
-
-    # ""
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=self.lr_patience,
-                                                         min_lr=self.min_lr, factor=self.decay_factor)  # DSRR
-        # return optimizer
-        return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "monitor": "val_loss"}}
-
-    def validation_step(self, batch, batch_idx):
-        self.model.eval()
-        inputs, labels = batch
-        loss_fn = nn.MSELoss()  # .to(device)
+        loss_fn = nn.MSELoss()
         outputs = self.model(inputs)
         loss = loss_fn(outputs, labels)
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)  # DSRR
+        
+        self.log("train_loss", loss, on_step=False, on_epoch=True,
+                prog_bar=True, logger=True, sync_dist=True)
+        
+        return loss
+
+    def configure_optimizers(self):
+        """Configure optimizer and learning rate scheduler."""
+        optimizer = torch.optim.Adam(
+            self.parameters(),
+            lr=self.lr,
+            weight_decay=self.weight_decay
+        )
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode='min',
+            patience=self.lr_patience,
+            min_lr=self.min_lr,
+            factor=self.decay_factor
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "val_loss"
+            }
+        }
+
+    def validation_step(self, batch, batch_idx):
+        """Validation step for one batch."""
+        self.model.eval()
+        inputs, labels = batch
+        loss_fn = nn.MSELoss()
+        outputs = self.model(inputs)
+        loss = loss_fn(outputs, labels)
+        
+        self.log("val_loss", loss, on_step=False, on_epoch=True,
+                prog_bar=True, logger=True, sync_dist=True)
+        
+        # Calculate and log PCC metric
         out_cpu = outputs.detach().cpu()
         lab_cpu = labels.detach().cpu()
         pcc = torch.tensor(self.metrics(out_cpu, lab_cpu)['PCC'].mean())
-        self.log("val_pcc", pcc, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        # return loss
+        self.log("val_pcc", pcc, on_step=False, on_epoch=True,
+                prog_bar=True, logger=True)
 
     def test_step(self, batch, batch_idx):
+        """Test step for one batch."""
         self.model.eval()
         inputs, labels = batch
-        loss_fn = nn.MSELoss()  # .to(device)
+        loss_fn = nn.MSELoss()
         outputs = self.model(inputs)
         loss = loss_fn(outputs, labels)
-        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)  # DSRR
-        # return loss
+        
+        self.log("test_loss", loss, on_step=False, on_epoch=True,
+                prog_bar=True, logger=True)
 
     def metrics(self, y_score, y_true):
-        vals = []
+        """Calculate Pearson and Spearman correlation metrics."""
+        # Spearman correlation
+        spearman_vals = []
         for output_index in range(y_score.shape[1]):
-            vals.append(stats.spearmanr(y_true[:, output_index], y_score[:, output_index])[0])  # DSRR
-        spearmanr_vals = np.array(vals)
-        #
-        vals = []
+            spearman_vals.append(
+                stats.spearmanr(y_true[:, output_index], y_score[:, output_index])[0]
+            )
+        spearmanr_vals = np.array(spearman_vals)
+        
+        # Pearson correlation
+        pearson_vals = []
         for output_index in range(y_score.shape[-1]):
-            vals.append(stats.pearsonr(y_true[:, output_index], y_score[:, output_index])[0])  # DSRR
-        pearsonr_vals = np.array(vals)
-        metrics = {'Spearman': spearmanr_vals, 'PCC': pearsonr_vals}
-        return metrics
+            pearson_vals.append(
+                stats.pearsonr(y_true[:, output_index], y_score[:, output_index])[0]
+            )
+        pearsonr_vals = np.array(pearson_vals)
+        
+        return {'Spearman': spearmanr_vals, 'PCC': pearsonr_vals}
 
-    def forward(self, x):  # DSRR
+    def forward(self, x):
+        """Forward pass through the model."""
         return self.model(x)
 
     def predict_custom(self, X, keepgrad=False):
+        """Custom prediction function with batch processing."""
         self.model.eval()
-        dataloader = torch.utils.data.DataLoader(X, batch_size=self.batch_size, shuffle=False)  # DSRR
+        dataloader = torch.utils.data.DataLoader(
+            X, batch_size=self.batch_size, shuffle=False
+        )
         preds = torch.empty(0)
+        
         if keepgrad:
             preds = preds.to(self.device)
         else:
             preds = preds.cpu()
-
+        
         for x in tqdm.tqdm(dataloader, total=len(dataloader)):
             pred = self.model(x)
-            if not keepgrad: pred = pred.detach().cpu()
+            if not keepgrad:
+                pred = pred.detach().cpu()
             preds = torch.cat((preds, pred), axis=0)
+        
         return preds
 
     def predict_custom_mcdropout(self, X, seed=41, keepgrad=False):
+        """Prediction with Monte Carlo dropout for uncertainty estimation."""
         torch.manual_seed(seed)
         random.seed(seed)
-        np.random.seed(seed)  # DSRR
+        np.random.seed(seed)
+        
         self.model.eval()
+        # Enable dropout during inference for MC dropout
         for m in self.model.modules():
             if m.__class__.__name__.startswith('Dropout'):
                 m.train()
-        #
-        dataloader = torch.utils.data.DataLoader(X, batch_size=self.batch_size, shuffle=False)
+        
+        dataloader = torch.utils.data.DataLoader(
+            X, batch_size=self.batch_size, shuffle=False
+        )
         preds = torch.empty(0)
+        
         if keepgrad:
             preds = preds.to(self.device)
         else:
             preds = preds.cpu()
-
+        
         for x in tqdm.tqdm(dataloader, total=len(dataloader)):
             pred = self.model(x)
-            if not keepgrad: pred = pred.detach().cpu()
+            if not keepgrad:
+                pred = pred.detach().cpu()
             preds = torch.cat((preds, pred), axis=0)
-
+        
         return preds
 
 
-###########################################
+# =============================================================================
+# Training Functions
+# =============================================================================
 
 
-def training_with_PL(chosen_model, chosen_dataset,
-                     initial_test=False, mcdropout_test=False, verbose=False, wanted_wandb=False):
+def training_with_PL(chosen_model: str, chosen_dataset: str,
+                     initial_test: bool = False,
+                     mcdropout_test: bool = False,
+                     verbose: bool = False,
+                     wanted_wandb: bool = False) -> Dict[str, np.ndarray]:
+    """Train MPRA model using PyTorch Lightning.
+    
+    Args:
+        chosen_model: Name of the model ('mpra')
+        chosen_dataset: Name of the dataset ('mpra_data')
+        initial_test: Whether to test before training
+        mcdropout_test: Whether to test with Monte Carlo dropout
+        verbose: Whether to print verbose output
+        wanted_wandb: Whether to use Weights & Biases logging
+        
+    Returns:
+        Dictionary containing evaluation metrics
+    """
+    # Setup logging
     if wanted_wandb:
         import wandb
-        from pytorch_lightning.loggers import WandbLogger  # https://docs.wandb.ai/guides/integrations/lightning
+        from pytorch_lightning.loggers import WandbLogger
         wandb_logger = WandbLogger(log_model="all")
-
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"{device=} {torch.cuda.is_available()=}")
-
-    currdir = os.popen('pwd').read().replace("\n", "")  # os.getcwd()
-    outdir = "../outputs/"  # ../../outputs_DALdna/"
+    
+    # Setup directories and logging
+    currdir = os.popen('pwd').read().replace("\n", "")
+    outdir = "../outputs/"
     log_dir = outdir + "lightning_logs_" + chosen_model + "/"
     tb_logger = pl_loggers.TensorBoardLogger(save_dir=log_dir)
 
-    if wanted_wandb:
-        logger_of_choice = wandb_logger
+    logger_of_choice = wandb_logger if wanted_wandb else tb_logger
+    
+    # Initialize model - note: use PL_MPRA class name
+    if chosen_model.lower() == 'mpra':
+        model = PL_MPRA(input_h5_file=f'./{chosen_dataset}.h5', initial_ds=True)
     else:
-        logger_of_choice = tb_logger
+        raise ValueError(f"Unknown model: {chosen_model}")
 
-    # model=eval("PL_"+chosen_model+"(input_h5_file='../inputs/"+chosen_dataset+".h5', initial_ds=True)") #PERFECT OLD
-    model = eval("PL_" + chosen_model + "(input_h5_file='./" + chosen_dataset + ".h5', initial_ds=True)")  # PERFECT OLD
+    # Setup data loaders
+    if verbose:
+        os.system('date')
+        print(f"Training data shape: {model.X_train.shape}")
+        print(f"Training labels shape: {model.y_train.shape}")
+    
+    train_dataloader = torch.utils.data.DataLoader(
+        list(zip(model.X_train, model.y_train)),
+        batch_size=model.batch_size,
+        shuffle=True
+    )
+    valid_dataloader = torch.utils.data.DataLoader(
+        list(zip(model.X_valid, model.y_valid)),
+        batch_size=model.batch_size,
+        shuffle=False
+    )
+    test_dataloader = torch.utils.data.DataLoader(
+        list(zip(model.X_test, model.y_test)),
+        batch_size=model.batch_size,
+        shuffle=False
+    )
 
-    os.system('date')
-    print(model.X_train.shape)
-    print(model.y_train.shape)
-    train_dataloader = torch.utils.data.DataLoader(list(zip(model.X_train, model.y_train)), batch_size=model.batch_size,
-                                                   shuffle=True)
-    os.system('date')
-    valid_dataloader = torch.utils.data.DataLoader(list(zip(model.X_valid, model.y_valid)), batch_size=model.batch_size,
-                                                   shuffle=False)  # True)
-    os.system('date')
-    test_dataloader = torch.utils.data.DataLoader(list(zip(model.X_test, model.y_test)), batch_size=model.batch_size,
-                                                  shuffle=False)  # True)
-    os.system('date')
-
-    ckptfile = "oracle_" + model.name + "_" + chosen_dataset + "_2"  # +".ckpt"
+    # Setup callbacks
+    ckptfile = f"oracle_{model.name}_{chosen_dataset}"
     to_monitor = 'val_loss'
+    
     callback_ckpt = pl.callbacks.ModelCheckpoint(
-        # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.ModelCheckpoint.html
-        # gpus=1,
-        # auto_select_gpus=True,
-        monitor=to_monitor,  # default is None which saves a checkpoint only for the last epoch.
+        monitor=to_monitor,
         mode='min',
         save_top_k=1,
         save_weights_only=True,
-        dirpath="./",  # "../inputs/", #get_github_main_directory(reponame='DALdna')+"inputs/",
-        filename=ckptfile,  # comment out to verify that a different epoch is picked in the name.
+        dirpath="./",
+        filename=ckptfile,
     )
+    
     early_stop_callback = pl.callbacks.EarlyStopping(
-        # monitor='val_loss',
         monitor=to_monitor,
         min_delta=model.min_delta,
-        # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.EarlyStopping.html
         patience=model.patience,
         verbose=False,
         mode='min'
     )
 
+    # Initial testing before training
     if initial_test:
-        print('predict_custom')
+        print('Running initial test...')
         y_score = model.predict_custom(model.X_test)
-        print('y_score.shape: ', y_score.shape)
+        print(f'y_score.shape: {y_score.shape}')
         metrics_pretrain = model.metrics(y_score, model.y_test)
-        print(f"{metrics_pretrain=}")
-        print(f"{model(model.X_test[0:10])=}")
+        print(f"Pre-training metrics: {metrics_pretrain}")
+        print(f"Sample predictions: {model(model.X_test[0:10])}")
 
+    # Monte Carlo dropout testing
     if mcdropout_test:
+        print('Running Monte Carlo dropout test...')
         n_mc = 5
         preds_mc = torch.zeros((n_mc, len(model.X_test)))
         for i in range(n_mc):
-            preds_mc[i] = model.predict_custom_mcdropout(model.X_test,
-                                                         seed=41 + i).squeeze(axis=1).unsqueeze(axis=0)
-        print('predict_custom_mcdropout')
-        print('y_score.shape: ', preds_mc.shape)
+            preds_mc[i] = model.predict_custom_mcdropout(
+                model.X_test, seed=41+i
+            ).squeeze(axis=1).unsqueeze(axis=0)
+        print(f'MC dropout predictions shape: {preds_mc.shape}')
         metrics_pretrain = model.metrics(y_score, model.y_test)
-        print(f"{metrics_pretrain=}")
-        print(f"{model(model.X_test[0:10])=}")
+        print(f"MC dropout metrics: {metrics_pretrain}")
+        print(f"Sample MC predictions: {model(model.X_test[0:10])}")
 
-    print(f"{model.device=}")
-    trainer = pl.Trainer(accelerator='cuda', devices=-1, max_epochs=model.train_max_epochs, logger=logger_of_choice,
-                         callbacks=[callback_ckpt, early_stop_callback], deterministic=True)
-    trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=valid_dataloader)  # GOODOLD
-    # os.system('mv ../inputs/'+ckptfile+'-v1.ckpt ../inputs/'+ckptfile+'.ckpt')
-    os.system('mv ./' + ckptfile + '-v1.ckpt ./' + ckptfile + '.ckpt')
-    if verbose: os.system('date')
+    # Training
+    print(f"Model device: {model.device}")
+    trainer = pl.Trainer(
+        accelerator='cuda',
+        devices=-1,
+        max_epochs=model.train_max_epochs,
+        logger=logger_of_choice,
+        callbacks=[callback_ckpt, early_stop_callback],
+        deterministic=True
+    )
+    
+    trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=valid_dataloader)
+    
+    # Rename checkpoint file
+    os.system(f'mv ./{ckptfile}-v1.ckpt ./{ckptfile}.ckpt')
+    
+    # Final evaluation
+    if verbose:
+        os.system('date')
     y_score = model.predict_custom(model.X_test)
-    if verbose: os.system('date')
+    if verbose:
+        os.system('date')
     metrics = model.metrics(y_score, model.y_test)
-    print(metrics) #{'Spearman': array([0.75220946, 0.77259962, 0.77856478]), 'PCC': array([0.83569508, 0.83646114, 0.83141418])}
-    #{'Spearman': array([0.75037962]), 'PCC': array([0.83507294])} for 0
-    #{'Spearman': array([0.77897868]), 'PCC': array([0.8383449])} for 1
-    #{'Spearman': array([0.77229597]), 'PCC': array([0.82239165])} for 2
-    """
+    print(f"Final metrics: {metrics}")
+    
+    # Log to wandb if enabled
     if wanted_wandb:
+        import wandb
         wandb.log(metrics)
-    """
-
-    print(ckptfile)
+    
+    print(f"Model checkpoint saved as: {ckptfile}")
     return metrics
 
 
-##############################################################
+# =============================================================================
+# Main Execution
+# =============================================================================
 
 
 if __name__ == '__main__':
-
-    pairlist = [
-        ['mpra', 'mpra_data'],
-
-    ]
-
+    """Main execution for training MPRA oracle model."""
+    
+    # Define model-dataset pairs
+    pairlist = [['mpra', 'mpra_data']]
+    
     for pair in pairlist:
-        chosen_model = pair[0]
-        chosen_dataset = pair[1]
-
-        # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+        chosen_model, chosen_dataset = pair
+        
+        # Set random seeds for reproducibility
         overall_seed = 41
-        myseed = overall_seed
-        torch.manual_seed(myseed)
-        random.seed(myseed)
-        np.random.seed(myseed)
-
+        torch.manual_seed(overall_seed)
+        random.seed(overall_seed)
+        np.random.seed(overall_seed)
+        
+        # Suppress Lightning logs
         import logging
-
         logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
-
-        # metrics=training_with_PL(chosen_model, chosen_dataset, initial_test=False, mcdropout_test=False, verbose=False, wanted_wandb=True)
-        metrics = training_with_PL(chosen_model, chosen_dataset, initial_test=True, mcdropout_test=False, verbose=False,
-                                   wanted_wandb=False)
-
-        print("SCRIPT END")
-        print("WARNING: should I do a deep ensemble, and then take the ckpt of the best model?")
+        
+        # Train model
+        metrics = training_with_PL(
+            chosen_model,
+            chosen_dataset,
+            initial_test=True,
+            mcdropout_test=False,
+            verbose=False,
+            wanted_wandb=False
+        )
+        
+        print("\n" + "="*50)
+        print("TRAINING COMPLETED")
+        print(f"Final metrics: {metrics}")
+        print("Note: Expected PCC ~0.83, Spearman ~0.77 for MPRA")
+        print("="*50)

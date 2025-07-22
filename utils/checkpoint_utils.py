@@ -122,31 +122,28 @@ def get_model_class_for_checkpoint(root_dir: str, dataset_name: str = None):
         if dataset_name is None and hasattr(cfg, 'data') and hasattr(cfg.data, 'train'):
             dataset_name = cfg.data.train
         
-        # Import appropriate model class
-        if dataset_name == 'promoter':
-            import sys
-            sys.path.insert(0, 'model_zoo/promoter')
-            try:
-                from transformer_promoter import SEDD
-                return SEDD
-            finally:
-                sys.path.pop(0)
-        elif dataset_name == 'mpra':
-            import sys
-            sys.path.insert(0, 'model_zoo/mpra')
-            try:
-                from transformer_mpra import SEDD
-                return SEDD
-            finally:
-                sys.path.pop(0)
-        else:
-            from model import SEDD
-            return SEDD
+        # Use dataset factory to get model creation function
+        from utils.dataset_factory import get_factory
+        factory = get_factory()
+        
+        # Return a factory function that creates the model
+        def create_model_fn(cfg):
+            architecture = getattr(cfg.model, 'architecture', 'transformer')
+            return factory.create_model(dataset_name, cfg, architecture)
+        
+        return create_model_fn
             
     except Exception as e:
-        print(f"Warning: Could not determine dataset-specific model, using generic SEDD: {e}")
-        from model import SEDD
-        return SEDD
+        print(f"Warning: Could not determine dataset-specific model, using default: {e}")
+        # Return default factory function
+        from utils.dataset_factory import get_factory
+        factory = get_factory()
+        
+        def create_model_fn(cfg):
+            architecture = getattr(cfg.model, 'architecture', 'transformer')
+            return factory.create_model('deepstarr', cfg, architecture)  # Default to deepstarr
+        
+        return create_model_fn
 
 
 def update_load_model_local(root_dir: str, device: str):

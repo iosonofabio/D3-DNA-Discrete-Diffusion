@@ -1,6 +1,6 @@
 import os
 import torch
-from model import SEDD
+from utils.dataset_factory import get_factory
 from utils.utils import load_hydra_config_from_run
 from model.ema import ExponentialMovingAverage
 from utils import graph_lib
@@ -9,10 +9,40 @@ from utils import noise_lib
 from omegaconf import OmegaConf
 
 def load_model_hf(dir, device):
-    print (dir)
-    score_model = SEDD.from_pretrained(dir).to(device)
-    graph = graph_lib.get_graph(score_model.config, device)
-    noise = noise_lib.get_noise(score_model.config).to(device)
+    print(dir)
+    # Try to determine dataset from directory name or config
+    factory = get_factory()
+    
+    # Load config if available
+    config_path = os.path.join(dir, 'config.yaml')
+    if os.path.exists(config_path):
+        config = OmegaConf.load(config_path)
+        dataset_name = config.dataset.name
+        architecture = config.model.architecture
+    else:
+        # Fallback to guessing from directory name
+        dir_name = os.path.basename(dir).lower()
+        if 'deepstarr' in dir_name:
+            dataset_name = 'deepstarr'
+        elif 'mpra' in dir_name:
+            dataset_name = 'mpra'
+        elif 'promoter' in dir_name:
+            dataset_name = 'promoter'
+        else:
+            dataset_name = 'deepstarr'  # Default
+        
+        architecture = 'transformer'  # Default
+        config = factory.load_config(dataset_name, architecture)
+    
+    score_model = factory.create_model(dataset_name, config, architecture).to(device)
+    
+    # Load pretrained weights if available
+    model_path = os.path.join(dir, 'pytorch_model.bin')
+    if os.path.exists(model_path):
+        score_model.load_state_dict(torch.load(model_path, map_location=device))
+    
+    graph = graph_lib.get_graph(config, device)
+    noise = noise_lib.get_noise(config).to(device)
     return score_model, graph, noise
 
 
@@ -20,17 +50,34 @@ def load_model_local(root_dir, device):
     """Enhanced version that handles both original .pth and Lightning .ckpt formats."""
     from utils.checkpoint_utils import (
         is_original_checkpoint, 
-        load_weights_from_original_checkpoint,
-        get_model_class_for_checkpoint
+        load_weights_from_original_checkpoint
     )
     
+    factory = get_factory()
     cfg = load_hydra_config_from_run(root_dir)
+    
+    # Determine dataset from config or directory name
+    if hasattr(cfg, 'data') and hasattr(cfg.data, 'train'):
+        dataset_name = cfg.data.train
+    else:
+        # Guess from directory name
+        dir_name = os.path.basename(root_dir).lower()
+        if 'deepstarr' in dir_name:
+            dataset_name = 'deepstarr'
+        elif 'mpra' in dir_name:
+            dataset_name = 'mpra'
+        elif 'promoter' in dir_name:
+            dataset_name = 'promoter'
+        else:
+            dataset_name = 'deepstarr'  # Default
+    
+    architecture = getattr(cfg.model, 'architecture', 'transformer')
+    
     graph = graph_lib.get_graph(cfg, device)
     noise = noise_lib.get_noise(cfg).to(device)
     
-    # Get appropriate model class based on dataset
-    SEDD_class = get_model_class_for_checkpoint(root_dir)
-    score_model = SEDD_class(cfg).to(device)
+    # Create model using dataset factory
+    score_model = factory.create_model(dataset_name, cfg, architecture).to(device)
     ema = ExponentialMovingAverage(score_model.parameters(), decay=cfg.training.ema)
 
     # Try to find checkpoint in multiple locations

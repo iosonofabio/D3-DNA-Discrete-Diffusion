@@ -1,3 +1,8 @@
-from .transformer import SEDD
-# from .transformer_mpra import SEDD
-# from .transformer_promoter import SEDD
+# Core model architectures
+from .transformer import TransformerModel
+from .cnn import ConvolutionalModel
+from .shared_components import *
+
+# Note: For new code, use the dataset factory:
+# from utils.dataset_factory import create_model
+# model = create_model('deepstarr', config, 'transformer')
