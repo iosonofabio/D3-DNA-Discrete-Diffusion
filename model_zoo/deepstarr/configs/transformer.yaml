@@ -100,6 +100,6 @@ wandb:
 
 # Paths (relative to dataset directory)
 paths:
-  data_dir: "."
+  data_dir: "model_zoo/deepstarr"
   oracle_model: "oracle_models/oracle_DeepSTARR_DeepSTARR_data.ckpt"
   checkpoints_dir: "checkpoints"
