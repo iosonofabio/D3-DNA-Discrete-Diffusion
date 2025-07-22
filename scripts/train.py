@@ -399,12 +399,12 @@ class BaseTrainer:
         # Model checkpointing
         checkpoint_callback = ModelCheckpoint(
             dirpath=os.path.join(self.work_dir, "checkpoints"),
-            filename="model-{epoch:02d}-{step:06d}-{val_loss:.4f}",
+            filename="model-{epoch:02d}-{val_loss:.4f}",
             save_top_k=3,
             monitor="val_loss",
             mode="min",
             save_last=True,
-            every_n_train_steps=self.cfg.training.snapshot_freq
+            every_n_epochs=self.cfg.training.get('checkpoint_every_n_epochs', 10)  # Save every 10 epochs by default
         )
         callbacks.append(checkpoint_callback)
         
@@ -427,12 +427,11 @@ class BaseTrainer:
     def create_trainer(self, **trainer_kwargs):
         """Create PyTorch Lightning trainer."""
         
-        # Extract relevant training parameters
+        # Extract relevant training parameters - using epochs instead of steps
         default_trainer_args = {
-            'max_steps': self.cfg.training.n_iters,
-            'log_every_n_steps': self.cfg.training.log_freq,
-            'val_check_interval': self.cfg.training.eval_freq,
-            'check_val_every_n_epoch': None,  # Allow step-based validation across epochs
+            'max_epochs': self.cfg.training.get('max_epochs', 300),  # Default to 300 epochs
+            'log_every_n_steps': self.cfg.training.get('log_freq', 50),
+            'check_val_every_n_epoch': self.cfg.training.get('val_every_n_epochs', 4),  # Validate every 4 epochs
             'accumulate_grad_batches': self.cfg.training.accum,
             'precision': 'bf16-mixed',  # Use mixed precision like original
             'gradient_clip_val': self.cfg.optim.grad_clip if self.cfg.optim.grad_clip >= 0 else None,
