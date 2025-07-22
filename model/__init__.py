@@ -1,7 +1,7 @@
 # Core model architectures
-from .transformer import TransformerModel
+from .transformer import TransformerModel  # Import both new and original SEDD
 from .cnn import ConvolutionalModel
-from .shared_components import *
+from .layers import *
 
 # Note: For new code, use the dataset factory:
 # from utils.dataset_factory import create_model
