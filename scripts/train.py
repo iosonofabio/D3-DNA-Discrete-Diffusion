@@ -213,29 +213,42 @@ class BaseD3LightningModule(pl.LightningModule):
                 gradient_clip_algorithm="norm"
             )
     
+
     def load_from_original_checkpoint(self, checkpoint_path: str):
-        """Load weights from original D3 .pth checkpoint format."""
-        print(f"Loading original checkpoint from: {checkpoint_path}")
-        
-        # Load the original checkpoint
+        """
+        Loads weights from checkpoint_path into self.score_model and self.ema,
+        skipping only layers whose shapes don't match (prints info for skipped layers).
+        Also updates the step counter if present.
+        """
         loaded_state = torch.load(checkpoint_path, map_location=self.device)
-        
-        # Load model weights (handle DDP wrapper)
-        if 'model' in loaded_state:
-            model_state = loaded_state['model']
-            self.score_model.load_state_dict(model_state, strict=False)
-            print("✓ Loaded model weights from original checkpoint")
-        
-        # Load EMA weights
+        state_dict = loaded_state.get('state_dict', checkpoint)
+
+        # --- Load model weights (partial) ---
+        model_dict = self.score_model.state_dict()
+        filtered_dict = {}
+        for k, v in state_dict.items():
+            if k in model_dict and v.shape == model_dict[k].shape:
+                filtered_dict[k] = v
+            else:
+                if k in model_dict:
+                    print(f"Skipping layer (by shape): {k} (checkpoint: {v.shape}, model: {model_dict[k].shape})")
+                else:
+                    print(f"Skipping layer (not in model): {k}")
+        model_dict.update(filtered_dict)
+        self.score_model.load_state_dict(model_dict, strict=False)
+        print("✓ Loaded partial model weights (except skipped layers)")
+
+        # --- Load EMA weights if present ---
         if 'ema' in loaded_state and self.ema is not None:
             self.ema.load_state_dict(loaded_state['ema'], device=self.device)
-            print("✓ Loaded EMA weights from original checkpoint")
-        
-        # Load step counter for logging
+            print("✓ Loaded EMA weights from checkpoint")
+
+        # --- Load step counter if present ---
         if 'step' in loaded_state:
             print(f"✓ Original checkpoint was at step: {loaded_state['step']}")
             
         return loaded_state.get('step', 0)
+
     
     def state_dict(self):
         """Override to include EMA state in Lightning checkpoints."""

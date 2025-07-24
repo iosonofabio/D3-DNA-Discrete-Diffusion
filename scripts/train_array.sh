@@ -42,7 +42,7 @@ fi
 echo "Running job array task $SLURM_ARRAY_TASK_ID with fraction_data=$fraction_data"
 
 # Run the training script with the current fraction_data value
-python scripts/train_lightning.py \
+python scripts/train.py \
     --dataset deepstarr \
     --arch Tran \
     --gpus 1 \
