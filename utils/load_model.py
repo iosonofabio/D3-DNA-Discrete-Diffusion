@@ -5,10 +5,7 @@ from typing import Tuple, Any, Union, Optional
 from omegaconf import OmegaConf, DictConfig
 
 from utils.utils import load_hydra_config_from_run
-from utils.model_interface import ModelLoader
-from model.ema import ExponentialMovingAverage
-from utils import graph_lib
-from utils import noise_lib
+from utils.checkpoint_utils import load_model_from_checkpoint_path
 
 def load_model_hf(dir: str, device: str) -> Tuple[torch.nn.Module, Any, Any]:
     """
@@ -39,9 +36,8 @@ def load_model_hf(dir: str, device: str) -> Tuple[torch.nn.Module, Any, Any]:
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"pytorch_model.bin not found in {dir}")
     
-    # Use generic model loader
-    loader = ModelLoader(device)
-    return loader.load_model_from_config(config, model_path)
+    # Use simplified checkpoint loading
+    return load_model_from_checkpoint_path(config, model_path, device)
 
 
 def load_model_local(root_dir: str, device: str, checkpoint_path: Optional[str] = None) -> Tuple[torch.nn.Module, Any, Any]:
@@ -71,11 +67,8 @@ def load_model_local(root_dir: str, device: str, checkpoint_path: Optional[str] 
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
     
-    # Use generic model loader with EMA
-    loader = ModelLoader(device)
-    model, graph, noise, ema = loader.load_model_with_ema(cfg, checkpoint_path)
-    
-    return model, graph, noise
+    # Use simplified checkpoint loading
+    return load_model_from_checkpoint_path(cfg, checkpoint_path, device)
 
 
 def load_model_from_lightning(checkpoint_path: str, device: str) -> Tuple[torch.nn.Module, Any, Any]:
@@ -107,11 +100,8 @@ def load_model_from_lightning(checkpoint_path: str, device: str) -> Tuple[torch.
     
     cfg = checkpoint['hyper_parameters']['cfg']
     
-    # Use generic model loader
-    loader = ModelLoader(device)
-    model, graph, noise, ema = loader.load_model_with_ema(cfg, checkpoint_path)
-    
-    return model, graph, noise
+    # Use simplified checkpoint loading
+    return load_model_from_checkpoint_path(cfg, checkpoint_path, device)
 
 
 def find_checkpoint_in_directory(root_dir: str) -> str:
@@ -158,8 +148,14 @@ def load_model_from_config_and_checkpoint(config: Union[str, DictConfig], checkp
     Returns:
         Tuple of (model, graph, noise)
     """
-    from utils.model_interface import load_model_from_config_and_checkpoint
-    return load_model_from_config_and_checkpoint(config, checkpoint_path, device)
+    if device == 'auto':
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    # Load config if it's a path
+    if isinstance(config, str):
+        config = OmegaConf.load(config)
+    
+    return load_model_from_checkpoint_path(config, checkpoint_path, device)
 
 
 # Legacy function with new implementation

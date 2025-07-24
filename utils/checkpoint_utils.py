@@ -6,7 +6,6 @@ Now provides dataset-agnostic checkpoint loading functions.
 import os
 import torch
 from typing import Dict, Any, Optional
-from pathlib import Path
 
 
 def is_original_checkpoint(checkpoint_path: str) -> bool:
@@ -114,14 +113,18 @@ def load_weights_from_original_checkpoint(model, ema, checkpoint_path: str, devi
 
 
 def create_model_from_config(cfg, device: str = 'cpu'):
-    """Create model from configuration using dataset factory."""
-    from utils.dataset_factory import get_factory
+    """Create model from configuration using base models only."""
+    architecture = getattr(cfg.model, 'architecture', 'transformer').lower()
     
-    factory = get_factory()
-    dataset_name = cfg.dataset.name
-    architecture = getattr(cfg.model, 'architecture', 'transformer')
+    if architecture == 'transformer':
+        from model.transformer import TransformerModel
+        model = TransformerModel(cfg)
+    elif architecture == 'convolutional':
+        from model.cnn import ConvolutionalModel
+        model = ConvolutionalModel(cfg)
+    else:
+        raise ValueError(f"Unsupported architecture: {architecture}. Supported: 'transformer', 'convolutional'")
     
-    model = factory.create_model(dataset_name, cfg, architecture)
     return model.to(device)
 
 

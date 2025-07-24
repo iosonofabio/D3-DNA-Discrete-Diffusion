@@ -2,98 +2,55 @@
 """
 MPRA Sampling Script
 
-This script provides sampling functionality specifically for the MPRA dataset,
-inheriting from the base sampling classes and implementing MPRA-specific
-model creation and label generation.
+Inherits from base sampling framework while using MPRA-specific models directly.
+Uses proper PC sampling methodology.
 """
 
 import os
 import sys
+import argparse
 from pathlib import Path
 
-# Package imports
+import torch
+from torch.utils.data import DataLoader
+from omegaconf import OmegaConf
+from typing import Optional
 
+# Add project root to Python path for imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+# Import base framework and MPRA-specific components
 from scripts.sample import BaseSampler, parse_base_args, main_sample
 from model_zoo.mpra.models import create_model
-from omegaconf import OmegaConf
-import torch
+from model_zoo.mpra.data import get_mpra_datasets
 
 
 class MPRASampler(BaseSampler):
-    """Sampler specifically for MPRA dataset."""
+    """MPRA-specific sampler that inherits from base framework."""
     
     def __init__(self):
-        super().__init__('mpra')
-        
-    def create_model(self, config, architecture):
+        super().__init__("MPRA")
+    
+    def create_model(self, config: OmegaConf, architecture: str):
         """Create MPRA-specific model."""
         return create_model(config, architecture)
-        
-    def get_sequence_length(self, config):
+    
+    def get_sequence_length(self, config: OmegaConf) -> int:
         """Get MPRA sequence length."""
-        # MPRA uses 200 bp sequences
         if hasattr(config, 'model') and hasattr(config.model, 'length'):
             return config.model.length
-        return 200
+        return 200  # MPRA default sequence length
     
-    def generate_labels(self, num_samples, config):
-        """
-        Generate conditioning labels for MPRA sampling.
-        
-        MPRA typically has 3 labels for different regulatory activities.
-        """
-        # Generate random labels in the range typical for MPRA targets
-        # You might want to adjust these ranges based on your specific needs
+    def generate_conditioning_labels(self, num_samples: int, config: OmegaConf) -> torch.Tensor:
+        """Generate conditioning labels for MPRA sampling."""
+        # MPRA typically has 3 labels for different regulatory activities
+        # Generate random activities in a reasonable range
         labels = torch.randn(num_samples, 3, device=self.device) * 1.5  # Adjust scale as needed
-        
         return labels
-    
-    def sample_with_specific_labels(self, checkpoint_path, config, architecture,
-                                   regulatory_activities=None, **kwargs):
-        """
-        Sample sequences with specific regulatory activity targets.
-        
-        Args:
-            checkpoint_path: Path to model checkpoint
-            config: Configuration object
-            architecture: Architecture name
-            regulatory_activities: Target regulatory activities (list of 3 values or list of lists)
-            **kwargs: Additional sampling arguments
-        """
-        # Load model
-        model = self.load_model_from_checkpoint(checkpoint_path, config, architecture)
-        
-        num_samples = kwargs.get('num_samples', 1000)
-        
-        # Create specific labels if provided
-        if regulatory_activities is not None:
-            if isinstance(regulatory_activities[0], (int, float)):
-                # Single set of activities, repeat for all samples
-                regulatory_activities = [regulatory_activities] * num_samples
-                
-            # Create label tensor
-            labels = torch.tensor(
-                regulatory_activities,
-                device=self.device, 
-                dtype=torch.float32
-            )
-            
-            # Override the generate_labels method for this call
-            original_generate_labels = self.generate_labels
-            self.generate_labels = lambda n, cfg: labels
-            
-            try:
-                sequences = self.sample_sequences(model, config, num_samples, **kwargs)
-            finally:
-                # Restore original method
-                self.generate_labels = original_generate_labels
-        else:
-            sequences = self.sample_sequences(model, config, num_samples, **kwargs)
-        
-        return sequences
 
 
-def load_config(architecture):
+def load_config(architecture: str):
     """Load MPRA configuration."""
     config_file = Path(__file__).parent / 'configs' / f'{architecture}.yaml'
     if not config_file.exists():
@@ -102,65 +59,72 @@ def load_config(architecture):
 
 
 def main():
-    """Main sampling function."""
+    """Main sampling function using base framework."""
+    # Parse arguments using base framework
     parser = parse_base_args()
-    parser.description = 'MPRA Sampling Script'
-    
-    # Add MPRA-specific arguments
-    parser.add_argument('--regulatory_activities', nargs=3, type=float, 
-                       help='Target regulatory activities (3 values)')
-    
+    # Add MPRA-specific conditioning arguments
+    parser.add_argument('--activity1', type=float, help='Activity 1 value (if not provided, uses random)')
+    parser.add_argument('--activity2', type=float, help='Activity 2 value (if not provided, uses random)')
+    parser.add_argument('--activity3', type=float, help='Activity 3 value (if not provided, uses random)')
+    parser.add_argument('--unconditional', action='store_true', help='Sample unconditionally (ignoring any labels)')
     args = parser.parse_args()
-    
-    # Create sampler
-    sampler = MPRASampler()
     
     # Load config if not provided
     if not args.config:
         try:
-            config = load_config(args.architecture)
-        except FileNotFoundError:
-            print(f"Error: No config provided and default config not found for architecture: {args.architecture}")
+            config_path = Path(__file__).parent / 'configs' / 'transformer.yaml'  # Default to transformer
+            if config_path.exists():
+                args.config = str(config_path)
+                print(f"Using default config: {args.config}")
+            else:
+                print(f"Error: No config provided and default config not found: {config_path}")
+                print("Please provide a config file with --config")
+                return 1
+        except Exception as e:
+            print(f"Error loading default config: {e}")
             return 1
-    else:
-        config = OmegaConf.load(args.config)
     
-    # Use specific label sampling if requested
-    if args.regulatory_activities is not None:
-        sequences = sampler.sample_with_specific_labels(
-            checkpoint_path=args.checkpoint,
-            config=config,
-            architecture=args.architecture,
-            regulatory_activities=args.regulatory_activities,
-            num_samples=args.num_samples,
-            method=args.method,
-            num_steps=args.num_steps,
-            eta=args.eta,
-            temperature=args.temperature
-        )
-        
-        # Save sequences
-        output_path = args.output or f"samples/mpra_{args.architecture}_{args.method}_specific_samples.{args.format}"
-        sampler.save_sequences(sequences, output_path, args.format)
-        
-        print(f"Sampling completed with specific labels. {args.num_samples} sequences generated.")
-    else:
-        # Use standard sampling
-        sequences = sampler.sample(
-            checkpoint_path=args.checkpoint,
-            config=config,
-            architecture=args.architecture,
-            num_samples=args.num_samples,
-            method=args.method,
-            num_steps=args.num_steps,
-            output_path=args.output,
-            format=args.format,
-            eta=args.eta,
-            temperature=args.temperature
-        )
-        
-        print(f"Sampling completed. {args.num_samples} sequences generated.")
+    config = OmegaConf.load(args.config)
+    sampler = MPRASampler()
     
+    # Generate conditioning labels based on arguments
+    conditioning_labels = None
+    if not args.unconditional:
+        if args.activity1 is not None and args.activity2 is not None and args.activity3 is not None:
+            # User-specified activities
+            conditioning_labels = torch.tensor([[args.activity1, args.activity2, args.activity3]], device=sampler.device).expand(args.num_samples, -1)
+            print(f"Using specified activities: Activity1={args.activity1}, Activity2={args.activity2}, Activity3={args.activity3}")
+        else:
+            # Random activities (default behavior)
+            conditioning_labels = sampler.generate_conditioning_labels(args.num_samples, config)
+            print("Using random activities")
+    else:
+        print("Sampling unconditionally (no conditioning labels)")
+    
+    # Set default steps to sequence length if not provided
+    steps = args.steps
+    if steps is None:
+        steps = sampler.get_sequence_length(config)
+        print(f"Using default steps: {steps} (sequence length)")
+    
+    # Run sampling only (no evaluation)
+    results = sampler.sample_and_save(
+        model_path=args.model_path,
+        config=config,
+        num_samples=args.num_samples,
+        steps=steps,
+        conditioning_labels=conditioning_labels,
+        output_path=args.output,
+        format=args.format
+    )
+    
+    # Print results
+    print(f"\nMPRA Sampling Results:")
+    print("=" * 40)
+    for key, value in results.items():
+        print(f"{key}: {value}")
+    
+    print(f"\n✓ MPRA sampling completed successfully!")
     return 0
 
 

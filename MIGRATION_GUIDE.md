@@ -19,6 +19,11 @@ This guide explains the changes made to make the D3-DNA codebase fully dataset-i
 
 **After**: Generic `ModelLoader` class that works with any properly configured dataset.
 
+### 4. Smart Model Selection
+**Before**: Used `dataset_factory` to create dataset-specific models.
+
+**After**: The system automatically detects and uses dataset-specific model wrappers when available (in `model_zoo/{dataset}/models.py`), and falls back to generic base models for unknown datasets. No more hardcoded factory logic.
+
 ## New API Usage
 
 ### Basic Model Loading
@@ -173,21 +178,39 @@ sequences = sampler.sample(
 
 ## Configuration Requirements
 
-Your configuration files must now include the dataset specification:
+Your configuration files must now include complete dataset and model specifications:
 
 ```yaml
 dataset:
-  name: "deepstarr"  # or "mpra", "promoter"
-  # ... other dataset config
+  name: "deepstarr"  # Dataset name (for reference only)
+  signal_dim: 2      # Number of conditioning signals
+  num_classes: 4     # Vocabulary size (A, C, G, T)
+  sequence_length: 249  # Length of sequences
+  # ... other dataset-specific parameters
 
 model:
-  architecture: "transformer"  # or "convolutional"
-  # ... other model config
+  architecture: "transformer"  # or "convolutional" 
+  hidden_size: 768
+  n_heads: 12
+  n_blocks: 12
+  # ... other model parameters
 
 training:
   ema: 0.999
   # ... other training config
+
+tokens: 4  # Vocabulary size for models
+graph:
+  type: "uniform"  # or "absorb"
+  # ... graph configuration
 ```
+
+**Key Requirements**:
+- `dataset.signal_dim`: Number of conditioning labels (e.g., 2 for DeepSTARR, 1 for Promoter)
+- `dataset.num_classes`: Usually 4 for DNA sequences (A, C, G, T)  
+- `model.architecture`: Must be "transformer" or "convolutional"
+- `training.ema`: Required for EMA loading
+- `tokens`: Vocabulary size for the model
 
 ## Breaking Changes
 

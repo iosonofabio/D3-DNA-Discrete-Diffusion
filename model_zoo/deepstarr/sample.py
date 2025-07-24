@@ -2,109 +2,59 @@
 """
 DeepSTARR Sampling Script
 
-This script provides sampling functionality specifically for the DeepSTARR dataset,
-inheriting from the base sampling classes and implementing DeepSTARR-specific
-model creation and label generation.
+Inherits from base sampling framework while using DeepSTARR-specific models directly.
+Uses proper PC sampling methodology.
 """
 
 import os
 import sys
+import argparse
 from pathlib import Path
 
-# Package imports
-
-from scripts.sample import BaseSampler, parse_base_args, main_sample
-from model_zoo.deepstarr.models import create_model
-from omegaconf import OmegaConf
 import torch
+from torch.utils.data import DataLoader
+from omegaconf import OmegaConf
+from typing import Optional
+
+# Add project root to Python path for imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+# Import base framework and DeepSTARR-specific components
+from scripts.sample import BaseSampler, parse_base_args, main_sample
+from model_zoo.deepstarr.models import DeepSTARRTransformerModel, DeepSTARRConvolutionalModel
+from model_zoo.deepstarr.data import get_deepstarr_datasets
+from model_zoo.deepstarr.deepstarr import PL_DeepSTARR
 
 
 class DeepSTARRSampler(BaseSampler):
-    """Sampler specifically for DeepSTARR dataset."""
+    """DeepSTARR-specific sampler that inherits from base framework."""
     
     def __init__(self):
-        super().__init__('deepstarr')
-        
-    def create_model(self, config, architecture):
+        super().__init__("DeepSTARR")
+    
+    def create_model(self, config: OmegaConf, architecture: str):
         """Create DeepSTARR-specific model."""
-        return create_model(config, architecture)
-        
-    def get_sequence_length(self, config):
-        """Get DeepSTARR sequence length."""
-        # DeepSTARR uses 249 bp sequences
-        if hasattr(config, 'model') and hasattr(config.model, 'length'):
-            return config.model.length
-        return 249
-    
-    def generate_labels(self, num_samples, config):
-        """
-        Generate conditioning labels for DeepSTARR sampling.
-        
-        DeepSTARR has two labels:
-        - Dev enhancer activity
-        - HK enhancer activity  
-        """
-        # Generate random labels in the range typical for DeepSTARR targets
-        # You might want to adjust these ranges based on your specific needs
-        dev_labels = torch.randn(num_samples, 1, device=self.device) * 2.0  # Adjust scale as needed
-        hk_labels = torch.randn(num_samples, 1, device=self.device) * 2.0   # Adjust scale as needed
-        
-        # Combine into shape (num_samples, 2)
-        labels = torch.cat([dev_labels, hk_labels], dim=1)
-        
-        return labels
-    
-    def sample_with_specific_labels(self, checkpoint_path, config, architecture,
-                                   dev_activity=None, hk_activity=None, **kwargs):
-        """
-        Sample sequences with specific enhancer activity targets.
-        
-        Args:
-            checkpoint_path: Path to model checkpoint
-            config: Configuration object
-            architecture: Architecture name
-            dev_activity: Target developmental enhancer activity (float or list)
-            hk_activity: Target housekeeping enhancer activity (float or list)
-            **kwargs: Additional sampling arguments
-        """
-        # Load model
-        model = self.load_model_from_checkpoint(checkpoint_path, config, architecture)
-        
-        num_samples = kwargs.get('num_samples', 1000)
-        
-        # Create specific labels if provided
-        if dev_activity is not None or hk_activity is not None:
-            if isinstance(dev_activity, (int, float)):
-                dev_activity = [dev_activity] * num_samples
-            if isinstance(hk_activity, (int, float)):
-                hk_activity = [hk_activity] * num_samples
-                
-            if dev_activity is None:
-                dev_activity = [0.0] * num_samples
-            if hk_activity is None:
-                hk_activity = [0.0] * num_samples
-                
-            # Create label tensor
-            labels = torch.tensor([
-                [dev, hk] for dev, hk in zip(dev_activity, hk_activity)
-            ], device=self.device, dtype=torch.float32)
-            
-            # Override the generate_labels method for this call
-            original_generate_labels = self.generate_labels
-            self.generate_labels = lambda n, cfg: labels
-            
-            try:
-                sequences = self.sample_sequences(model, config, num_samples, **kwargs)
-            finally:
-                # Restore original method
-                self.generate_labels = original_generate_labels
+        if architecture.lower() == 'transformer':
+            return DeepSTARRTransformerModel(config)
+        elif architecture.lower() == 'convolutional':
+            return DeepSTARRConvolutionalModel(config)
         else:
-            sequences = self.sample_sequences(model, config, num_samples, **kwargs)
-        
-        return sequences
+            raise ValueError(f"Unsupported architecture: {architecture}")
+    
+    def get_sequence_length(self, config: OmegaConf) -> int:
+        """Get DeepSTARR sequence length."""
+        return 249  # DeepSTARR fixed sequence length
+    
+    def generate_conditioning_labels(self, num_samples: int, config: OmegaConf) -> torch.Tensor:
+        """Generate conditioning labels for DeepSTARR sampling."""
+        # DeepSTARR has 2 activities: Dev and HK enhancer activities
+        # Generate random activities in a reasonable range
+        labels = torch.randn(num_samples, 2, device=self.device)
+        return labels
 
 
-def load_config(architecture):
+def load_config(architecture: str):
     """Load DeepSTARR configuration."""
     config_file = Path(__file__).parent / 'configs' / f'{architecture}.yaml'
     if not config_file.exists():
@@ -113,66 +63,71 @@ def load_config(architecture):
 
 
 def main():
-    """Main sampling function."""
+    """Main sampling function using base framework."""
+    # Parse arguments using base framework
     parser = parse_base_args()
-    parser.description = 'DeepSTARR Sampling Script'
-    
-    # Add DeepSTARR-specific arguments
-    parser.add_argument('--dev_activity', type=float, help='Target developmental enhancer activity')
-    parser.add_argument('--hk_activity', type=float, help='Target housekeeping enhancer activity')
-    
+    # Add DeepSTARR-specific conditioning arguments
+    parser.add_argument('--dev_activity', type=float, help='Dev enhancer activity value (if not provided, uses random)')
+    parser.add_argument('--hk_activity', type=float, help='HK enhancer activity value (if not provided, uses random)')
+    parser.add_argument('--unconditional', action='store_true', help='Sample unconditionally (ignoring any labels)')
     args = parser.parse_args()
-    
-    # Create sampler
-    sampler = DeepSTARRSampler()
     
     # Load config if not provided
     if not args.config:
         try:
-            config = load_config(args.architecture)
-        except FileNotFoundError:
-            print(f"Error: No config provided and default config not found for architecture: {args.architecture}")
+            config_path = Path(__file__).parent / 'configs' / 'transformer.yaml'  # Default to transformer
+            if config_path.exists():
+                args.config = str(config_path)
+                print(f"Using default config: {args.config}")
+            else:
+                print(f"Error: No config provided and default config not found: {config_path}")
+                print("Please provide a config file with --config")
+                return 1
+        except Exception as e:
+            print(f"Error loading default config: {e}")
             return 1
-    else:
-        config = OmegaConf.load(args.config)
     
-    # Use specific label sampling if requested
-    if args.dev_activity is not None or args.hk_activity is not None:
-        sequences = sampler.sample_with_specific_labels(
-            checkpoint_path=args.checkpoint,
-            config=config,
-            architecture=args.architecture,
-            dev_activity=args.dev_activity,
-            hk_activity=args.hk_activity,
-            num_samples=args.num_samples,
-            method=args.method,
-            num_steps=args.num_steps,
-            eta=args.eta,
-            temperature=args.temperature
-        )
-        
-        # Save sequences
-        output_path = args.output or f"samples/deepstarr_{args.architecture}_{args.method}_specific_samples.{args.format}"
-        sampler.save_sequences(sequences, output_path, args.format)
-        
-        print(f"Sampling completed with specific labels. {args.num_samples} sequences generated.")
-    else:
-        # Use standard sampling
-        sequences = sampler.sample(
-            checkpoint_path=args.checkpoint,
-            config=config,
-            architecture=args.architecture,
-            num_samples=args.num_samples,
-            method=args.method,
-            num_steps=args.num_steps,
-            output_path=args.output,
-            format=args.format,
-            eta=args.eta,
-            temperature=args.temperature
-        )
-        
-        print(f"Sampling completed. {args.num_samples} sequences generated.")
+    config = OmegaConf.load(args.config)
+    sampler = DeepSTARRSampler()
     
+    # Generate conditioning labels based on arguments
+    conditioning_labels = None
+    if not args.unconditional:
+        if args.dev_activity is not None and args.hk_activity is not None:
+            # User-specified activities
+            conditioning_labels = torch.tensor([[args.dev_activity, args.hk_activity]], device=sampler.device).expand(args.num_samples, -1)
+            print(f"Using specified activities: Dev={args.dev_activity}, HK={args.hk_activity}")
+        else:
+            # Random activities (default behavior)
+            conditioning_labels = sampler.generate_conditioning_labels(args.num_samples, config)
+            print("Using random activities")
+    else:
+        print("Sampling unconditionally (no conditioning labels)")
+    
+    # Set default steps to sequence length if not provided
+    steps = args.steps
+    if steps is None:
+        steps = sampler.get_sequence_length(config)
+        print(f"Using default steps: {steps} (sequence length)")
+    
+    # Run sampling only (no evaluation)
+    results = sampler.sample_and_save(
+        model_path=args.model_path,
+        config=config,
+        num_samples=args.num_samples,
+        steps=steps,
+        conditioning_labels=conditioning_labels,
+        output_path=args.output,
+        format=args.format
+    )
+    
+    # Print results
+    print(f"\nDeepSTARR Sampling Results:")
+    print("=" * 40)
+    for key, value in results.items():
+        print(f"{key}: {value}")
+    
+    print(f"\n✓ DeepSTARR sampling completed successfully!")
     return 0
 
 
