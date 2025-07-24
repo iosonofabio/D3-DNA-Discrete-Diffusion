@@ -21,8 +21,8 @@ from tqdm import tqdm
 
 # Package imports
 
+from utils.model_interface import ModelLoader
 from utils.checkpoint_utils import is_original_checkpoint
-from utils.load_model import load_model_from_checkpoint
 
 
 class BaseSampler:
@@ -56,55 +56,19 @@ class BaseSampler:
     
     def load_model_from_checkpoint(self, checkpoint_path: str, config: OmegaConf, architecture: str):
         """
-        Load model from checkpoint with proper handling of different checkpoint formats.
+        Load model from checkpoint using the generic model loader.
         
         Args:
             checkpoint_path: Path to checkpoint file
             config: Configuration object
-            architecture: Architecture name
+            architecture: Architecture name (kept for compatibility)
             
         Returns:
             Loaded model
         """
-        print(f"Loading model from {checkpoint_path}")
-        
-        # Create model
-        model = self.create_model(config, architecture)
-        model.to(self.device)
-        
-        # Load checkpoint weights
-        if checkpoint_path.endswith('.ckpt'):
-            # PyTorch Lightning checkpoint
-            checkpoint = torch.load(checkpoint_path, map_location=self.device)
-            if 'state_dict' in checkpoint:
-                # Remove 'model.' or 'score_model.' prefix if present
-                state_dict = {}
-                for k, v in checkpoint['state_dict'].items():
-                    if k.startswith('score_model.'):
-                        k = k[12:]  # Remove 'score_model.' prefix
-                    elif k.startswith('model.'):
-                        k = k[6:]  # Remove 'model.' prefix
-                    state_dict[k] = v
-            else:
-                state_dict = checkpoint
-        else:
-            # Regular PyTorch checkpoint or original D3 format
-            checkpoint = torch.load(checkpoint_path, map_location=self.device)
-            if 'model' in checkpoint:
-                # Original D3 checkpoint format
-                state_dict = checkpoint['model']
-            else:
-                state_dict = checkpoint
-        
-        # Load state dict with non-strict loading to handle minor incompatibilities
-        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
-        
-        if missing_keys:
-            print(f"Warning: Missing keys in checkpoint: {missing_keys}")
-        if unexpected_keys:
-            print(f"Warning: Unexpected keys in checkpoint: {unexpected_keys}")
-            
-        print("✓ Model loaded successfully")
+        # Use the generic model loader
+        loader = ModelLoader(self.device)
+        model, _, _ = loader.load_model_from_config(config, checkpoint_path)
         return model
     
     def get_sequence_length(self, config: OmegaConf) -> int:
@@ -117,19 +81,24 @@ class BaseSampler:
         Returns:
             Sequence length
         """
-        # Default implementation tries common config locations
+        # Try common config locations
         if hasattr(config, 'dataset') and hasattr(config.dataset, 'sequence_length'):
             return config.dataset.sequence_length
         elif hasattr(config, 'model') and hasattr(config.model, 'length'):
             return config.model.length
-        else:
-            # Dataset-specific defaults
-            defaults = {
-                'deepstarr': 249,
-                'mpra': 200,
-                'promoter': 1024
-            }
-            return defaults.get(self.dataset_name.lower(), 249)
+        elif hasattr(config, 'data') and hasattr(config.data, 'sequence_length'):
+            return config.data.sequence_length
+        
+        # Get dataset name from config if available
+        dataset_name = config.dataset.name.lower() if hasattr(config, 'dataset') and hasattr(config.dataset, 'name') else self.dataset_name.lower()
+        
+        # Dataset-specific defaults
+        defaults = {
+            'deepstarr': 249,
+            'mpra': 200,
+            'promoter': 1024
+        }
+        return defaults.get(dataset_name, 249)
     
     def get_vocab_size(self, config: OmegaConf) -> int:
         """
@@ -159,14 +128,24 @@ class BaseSampler:
         Returns:
             Label tensor
         """
-        # Default implementation based on dataset type
-        if self.dataset_name.lower() == 'deepstarr':
+        # Try to get label dimensions from config first
+        if hasattr(config, 'model') and hasattr(config.model, 'label_dim'):
+            label_dim = config.model.label_dim
+            return torch.randn(num_samples, label_dim, device=self.device)
+        elif hasattr(config, 'dataset') and hasattr(config.dataset, 'label_dim'):
+            label_dim = config.dataset.label_dim
+            return torch.randn(num_samples, label_dim, device=self.device)
+        
+        # Fallback to dataset-specific defaults
+        dataset_name = config.dataset.name.lower() if hasattr(config, 'dataset') and hasattr(config.dataset, 'name') else self.dataset_name.lower()
+        
+        if dataset_name == 'deepstarr':
             # DeepSTARR has 2 labels (Dev and HK enhancer activity)
             return torch.randn(num_samples, 2, device=self.device)
-        elif self.dataset_name.lower() == 'mpra':
+        elif dataset_name == 'mpra':
             # MPRA has 3 labels
             return torch.randn(num_samples, 3, device=self.device)
-        elif self.dataset_name.lower() == 'promoter':
+        elif dataset_name == 'promoter':
             # Promoter has 1 label
             return torch.randn(num_samples, 1, device=self.device)
         else:
@@ -409,12 +388,15 @@ def main_sample(sampler: BaseSampler, args):
         sampler: Dataset-specific sampler instance
         args: Parsed command line arguments
     """
-    # Load configuration
-    if args.config:
-        config = OmegaConf.load(args.config)
-    else:
-        # Use default config loading method (to be implemented by subclasses)
-        raise ValueError("Config file must be provided")
+    # Load configuration - now required
+    if not args.config:
+        raise ValueError("Config file is required. Please provide --config path/to/config.yaml")
+    
+    config = OmegaConf.load(args.config)
+    
+    # Validate that checkpoint exists
+    if not os.path.exists(args.checkpoint):
+        raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
     
     # Run sampling
     sequences = sampler.sample(

@@ -1,186 +1,178 @@
 import os
 import torch
-from utils.dataset_factory import get_factory
+from pathlib import Path
+from typing import Tuple, Any, Union, Optional
+from omegaconf import OmegaConf, DictConfig
+
 from utils.utils import load_hydra_config_from_run
+from utils.model_interface import ModelLoader
 from model.ema import ExponentialMovingAverage
 from utils import graph_lib
 from utils import noise_lib
 
-from omegaconf import OmegaConf
-
-def load_model_hf(dir, device):
-    print(dir)
-    # Try to determine dataset from directory name or config
-    factory = get_factory()
+def load_model_hf(dir: str, device: str) -> Tuple[torch.nn.Module, Any, Any]:
+    """
+    Load model from HuggingFace-style directory with config and weights.
     
-    # Load config if available
-    config_path = os.path.join(dir, 'config.yaml')
-    if os.path.exists(config_path):
-        config = OmegaConf.load(config_path)
-        dataset_name = config.dataset.name
-        architecture = config.model.architecture
-    else:
-        # Fallback to guessing from directory name
-        dir_name = os.path.basename(dir).lower()
-        if 'deepstarr' in dir_name:
-            dataset_name = 'deepstarr'
-        elif 'mpra' in dir_name:
-            dataset_name = 'mpra'
-        elif 'promoter' in dir_name:
-            dataset_name = 'promoter'
-        else:
-            dataset_name = 'deepstarr'  # Default
+    Args:
+        dir: Directory containing config.yaml and pytorch_model.bin
+        device: Device to load model on
         
-        architecture = 'transformer'  # Default
-        config = factory.load_config(dataset_name, architecture)
+    Returns:
+        Tuple of (model, graph, noise)
+        
+    Raises:
+        FileNotFoundError: If config.yaml is not found
+        ValueError: If config is invalid
+    """
+    print(f"Loading model from HF directory: {dir}")
     
-    score_model = factory.create_model(dataset_name, config, architecture).to(device)
+    # Load config (required)
+    config_path = os.path.join(dir, 'config.yaml')
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"config.yaml not found in {dir}")
     
-    # Load pretrained weights if available
+    config = OmegaConf.load(config_path)
+    
+    # Find model weights file
     model_path = os.path.join(dir, 'pytorch_model.bin')
-    if os.path.exists(model_path):
-        score_model.load_state_dict(torch.load(model_path, map_location=device))
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"pytorch_model.bin not found in {dir}")
     
-    graph = graph_lib.get_graph(config, device)
-    noise = noise_lib.get_noise(config).to(device)
-    return score_model, graph, noise
+    # Use generic model loader
+    loader = ModelLoader(device)
+    return loader.load_model_from_config(config, model_path)
 
 
-def load_model_local(root_dir, device):
-    """Enhanced version that handles both original .pth and Lightning .ckpt formats."""
-    from utils.checkpoint_utils import (
-        is_original_checkpoint, 
-        load_weights_from_original_checkpoint
-    )
+def load_model_local(root_dir: str, device: str, checkpoint_path: Optional[str] = None) -> Tuple[torch.nn.Module, Any, Any]:
+    """
+    Load model from local directory with Hydra config.
     
-    factory = get_factory()
+    Args:
+        root_dir: Directory containing Hydra config
+        device: Device to load model on
+        checkpoint_path: Explicit path to checkpoint file. If None, searches for common checkpoint files.
+        
+    Returns:
+        Tuple of (model, graph, noise)
+        
+    Raises:
+        FileNotFoundError: If config or checkpoint not found
+    """
+    print(f"Loading model from local directory: {root_dir}")
+    
+    # Load Hydra config
     cfg = load_hydra_config_from_run(root_dir)
     
-    # Determine dataset from config or directory name
-    if hasattr(cfg, 'data') and hasattr(cfg.data, 'train'):
-        dataset_name = cfg.data.train
-    else:
-        # Guess from directory name
-        dir_name = os.path.basename(root_dir).lower()
-        if 'deepstarr' in dir_name:
-            dataset_name = 'deepstarr'
-        elif 'mpra' in dir_name:
-            dataset_name = 'mpra'
-        elif 'promoter' in dir_name:
-            dataset_name = 'promoter'
-        else:
-            dataset_name = 'deepstarr'  # Default
+    # Find checkpoint if not explicitly provided
+    if checkpoint_path is None:
+        checkpoint_path = find_checkpoint_in_directory(root_dir)
     
-    architecture = getattr(cfg.model, 'architecture', 'transformer')
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
     
-    graph = graph_lib.get_graph(cfg, device)
-    noise = noise_lib.get_noise(cfg).to(device)
+    # Use generic model loader with EMA
+    loader = ModelLoader(device)
+    model, graph, noise, ema = loader.load_model_with_ema(cfg, checkpoint_path)
     
-    # Create model using dataset factory
-    score_model = factory.create_model(dataset_name, cfg, architecture).to(device)
-    ema = ExponentialMovingAverage(score_model.parameters(), decay=cfg.training.ema)
+    return model, graph, noise
 
-    # Try to find checkpoint in multiple locations
-    checkpoint_paths = [
-        os.path.join(root_dir, "checkpoint.pth"),
-        os.path.join(root_dir, "lightning_checkpoints", "last.ckpt"),
-        os.path.join(root_dir, "last.ckpt"),
+
+def load_model_from_lightning(checkpoint_path: str, device: str) -> Tuple[torch.nn.Module, Any, Any]:
+    """
+    Load model directly from Lightning checkpoint.
+    
+    Args:
+        checkpoint_path: Path to Lightning checkpoint file
+        device: Device to load model on
+        
+    Returns:
+        Tuple of (model, graph, noise)
+        
+    Raises:
+        FileNotFoundError: If checkpoint not found
+        ValueError: If config not found in checkpoint
+    """
+    print(f"Loading model from Lightning checkpoint: {checkpoint_path}")
+    
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    
+    # Load checkpoint to extract config
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    
+    # Extract config from hyperparameters
+    if 'hyper_parameters' not in checkpoint or 'cfg' not in checkpoint['hyper_parameters']:
+        raise ValueError(f"Config not found in Lightning checkpoint: {checkpoint_path}")
+    
+    cfg = checkpoint['hyper_parameters']['cfg']
+    
+    # Use generic model loader
+    loader = ModelLoader(device)
+    model, graph, noise, ema = loader.load_model_with_ema(cfg, checkpoint_path)
+    
+    return model, graph, noise
+
+
+def find_checkpoint_in_directory(root_dir: str) -> str:
+    """
+    Find checkpoint file in directory using common patterns.
+    
+    Args:
+        root_dir: Directory to search in
+        
+    Returns:
+        Path to found checkpoint
+        
+    Raises:
+        FileNotFoundError: If no checkpoint found
+    """
+    # Try common checkpoint locations (in order of preference)
+    checkpoint_patterns = [
+        "checkpoint.pth",  # Original D3 format
+        "pytorch_model.bin",  # HuggingFace format
+        "model.ckpt",  # Common Lightning format
+        "last.ckpt",  # Lightning last checkpoint
+        "lightning_checkpoints/last.ckpt",  # Lightning in subdirectory
+        "best.ckpt",  # Lightning best checkpoint
     ]
     
-    checkpoint_path = None
-    for path in checkpoint_paths:
-        if os.path.exists(path):
-            checkpoint_path = path
-            break
+    for pattern in checkpoint_patterns:
+        checkpoint_path = os.path.join(root_dir, pattern)
+        if os.path.exists(checkpoint_path):
+            return checkpoint_path
     
-    if checkpoint_path is None:
-        raise FileNotFoundError(f"No checkpoint found in {root_dir}")
-    
-    print(f"Loading checkpoint: {checkpoint_path}")
-    
-    if is_original_checkpoint(checkpoint_path):
-        # Load original format
-        step = load_weights_from_original_checkpoint(score_model, ema, checkpoint_path, device)
-    else:
-        # Handle Lightning format
-        checkpoint = torch.load(checkpoint_path, map_location=device)
-        
-        # Extract model weights from Lightning state_dict
-        model_state = {}
-        ema_state = {}
-        
-        for key, value in checkpoint.get('state_dict', {}).items():
-            if key.startswith('score_model.'):
-                model_key = key.replace('score_model.', '')
-                model_state[model_key] = value
-            elif key.startswith('ema.'):
-                ema_key = key.replace('ema.', '')
-                ema_state[ema_key] = value
-        
-        # Load states
-        if model_state:
-            score_model.load_state_dict(model_state, strict=False)
-            print("✓ Loaded model weights from Lightning checkpoint")
-        
-        if ema_state:
-            ema.load_state_dict(ema_state)
-            print("✓ Loaded EMA weights from Lightning checkpoint")
-        
-        step = checkpoint.get('global_step', 0)
-        print(f"✓ Lightning checkpoint was at step: {step}")
-
-    # Apply EMA weights to model
-    ema.store(score_model.parameters())
-    ema.copy_to(score_model.parameters())
-    
-    return score_model, graph, noise
+    raise FileNotFoundError(f"No checkpoint found in {root_dir}. Tried: {checkpoint_patterns}")
 
 
-def load_model_from_lightning(checkpoint_path, device):
-    """Load model specifically from Lightning checkpoint."""
-    # Try to determine dataset from checkpoint or path
-    dataset_name = None
-    if 'promoter' in checkpoint_path.lower():
-        dataset_name = 'promoter'
-    elif 'mpra' in checkpoint_path.lower():
-        dataset_name = 'mpra'
-    elif 'deepstarr' in checkpoint_path.lower():
-        dataset_name = 'deepstarr'
+def load_model_from_config_and_checkpoint(config: Union[str, DictConfig], checkpoint_path: str, 
+                                        device: str = 'auto') -> Tuple[torch.nn.Module, Any, Any]:
+    """
+    Generic model loading function that works with explicit config and checkpoint.
     
-    # Load checkpoint to get config and determine correct module type
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    
-    # Try to get dataset from hyperparameters
-    if 'hyper_parameters' in checkpoint and 'cfg' in checkpoint['hyper_parameters']:
-        cfg = checkpoint['hyper_parameters']['cfg']
-        if hasattr(cfg, 'data') and hasattr(cfg.data, 'train'):
-            dataset_name = cfg.data.train
-    
-    # Import appropriate Lightning module class
-    if dataset_name == 'promoter':
-        from scripts.lightning_trainer import PromoterD3LightningModule
-        lightning_model = PromoterD3LightningModule.load_from_checkpoint(checkpoint_path)
-    elif dataset_name == 'mpra':
-        from scripts.lightning_trainer import MPRAD3LightningModule
-        lightning_model = MPRAD3LightningModule.load_from_checkpoint(checkpoint_path)
-    else:
-        from scripts.lightning_trainer import D3LightningModule
-        lightning_model = D3LightningModule.load_from_checkpoint(checkpoint_path)
-    
-    lightning_model = lightning_model.to(device)
-    lightning_model.eval()
-    
-    # Extract components
-    score_model = lightning_model.score_model
-    graph = lightning_model.graph
-    noise = lightning_model.noise
-    
-    # Apply EMA weights
-    lightning_model.ema.store(score_model.parameters())
-    lightning_model.ema.copy_to(score_model.parameters())
-    
-    return score_model, graph, noise
+    Args:
+        config: Configuration file path or DictConfig object
+        checkpoint_path: Explicit path to checkpoint file
+        device: Device to load on ('cuda', 'cpu', or 'auto')
+        
+    Returns:
+        Tuple of (model, graph, noise)
+    """
+    from utils.model_interface import load_model_from_config_and_checkpoint
+    return load_model_from_config_and_checkpoint(config, checkpoint_path, device)
 
 
-def load_model(root_dir, device):
+# Legacy function with new implementation
+def load_model(root_dir: str, device: str) -> Tuple[torch.nn.Module, Any, Any]:
+    """
+    Legacy function for backward compatibility.
+    Now uses HuggingFace-style loading as default.
+    
+    Args:
+        root_dir: Directory containing model files
+        device: Device to load on
+        
+    Returns:
+        Tuple of (model, graph, noise)
+    """
     return load_model_hf(root_dir, device)
