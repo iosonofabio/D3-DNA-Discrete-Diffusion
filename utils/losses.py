@@ -6,7 +6,7 @@ from utils import graph_lib
 from utils.utils import get_score_fn
 
 
-def get_loss_fn(noise, graph, train, sampling_eps=1e-3, lv=False, sc=True):
+def get_loss_fn(noise, graph, train, sampling_eps=1e-3, lv=False, sc=False):
 
     def loss_fn(model, batch, labels, cond=None, t=None, perturbed_batch=None):
         """

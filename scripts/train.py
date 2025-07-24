@@ -23,6 +23,8 @@ from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 import numpy as np
 from omegaconf import OmegaConf
 
+torch.set_float32_matmul_precision('medium')
+
 # Package imports
 
 from model.ema import ExponentialMovingAverage
@@ -380,12 +382,12 @@ class BaseTrainer:
         
         # WandB logger if configured
         if hasattr(self.cfg, 'wandb') and self.cfg.wandb.get('enabled', False):
-            config_dict = OmegaConf.to_yaml(self.cfg)
+            # config_dict = OmegaConf.to_yaml(self.cfg)
             wandb_logger = WandbLogger(
                 project=self.cfg.wandb.get('project', 'd3-dna-diffusion'),
                 name=self.cfg.wandb.get('name', f"{self.dataset_name}_{self.cfg.model.architecture}"),
                 entity=self.cfg.wandb.get('entity', None),
-                config=config_dict,
+                # config=config_dict,
                 save_dir=self.work_dir
             )
             loggers.append(wandb_logger)
