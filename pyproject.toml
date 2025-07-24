@@ -37,6 +37,7 @@ dependencies = [
     "h5py",
     "numpy",
     "scipy",
+    "tqdm",
 ]
 
 [project.optional-dependencies]
@@ -44,11 +45,14 @@ dev = [
     "pytest",
     "black",
     "flake8",
+    "mypy",
+    "pre-commit",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["utils*", "model*", "scripts*", "evaluation*"]
+include = ["utils*", "model*", "scripts*", "evaluation*", "model_zoo*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.yaml", "*.yml"] 
+"*" = ["*.yaml", "*.yml", "*.h5"]
+

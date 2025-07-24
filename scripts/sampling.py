@@ -1,8 +1,7 @@
 import abc
 import torch
 import torch.nn.functional as F
-from scripts.catsample import sample_categorical
-from scripts.ddim_sampling import get_ddim_sampler
+from utils.catsample import sample_categorical
 
 from utils.utils import get_score_fn
 
@@ -151,51 +150,4 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
     return pc_sampler
 
 
-def get_ddim_sampler_wrapper(graph, noise, batch_dims, num_inference_steps=20, eta=0.0, temperature=1.0, device=torch.device('cpu')):
-    """
-    Wrapper for DDIM sampler to match the interface of get_pc_sampler.
-    
-    Args:
-        graph: Graph object
-        noise: Noise schedule
-        batch_dims: Tuple of (batch_size, seq_length)
-        num_inference_steps: Number of DDIM steps
-        eta: Stochasticity parameter
-        temperature: Sampling temperature
-        device: Device to run on
-    
-    Returns:
-        Sampling function that takes (model, labels) and returns samples
-    """
-    if graph.absorb:
-        raise ValueError("DDIM sampler currently only supports uniform (non-absorbing) graphs")
-    
-    batch_size, seq_length = batch_dims
-    ddim_sampler_fn = get_ddim_sampler(graph, noise, device)
-    
-    @torch.no_grad()
-    def ddim_wrapper(model, labels):
-        # Create DDIM sampler with the actual model
-        from scripts.ddim_sampling import UniformDDIMSampler
-        
-        # Get model in correct format for DDIM sampler
-        sampling_score_fn = get_score_fn(model, train=False, sampling=True)
-        
-        # Create a wrapped model that matches DDIM interface
-        def wrapped_model(x, sigma):
-            # labels are not used in current DDIM implementation, but kept for compatibility
-            return sampling_score_fn(x, labels, sigma)
-        
-        # Create DDIM sampler instance directly
-        sampler = UniformDDIMSampler(wrapped_model, graph, noise, device, original_model=model)
-        
-        return sampler.sample_ddim(
-            batch_size=batch_size,
-            seq_length=seq_length,
-            num_inference_steps=num_inference_steps,
-            eta=eta,
-            temperature=temperature
-        )
-    
-    return ddim_wrapper
 

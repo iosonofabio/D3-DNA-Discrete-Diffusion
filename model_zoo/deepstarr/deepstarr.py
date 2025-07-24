@@ -1,6 +1,29 @@
+"""
+DeepSTARR Oracle Model for DeepSTARR Dataset
+
+This module contains the original DeepSTARR model architecture from
+de Almeida et al., 2022 (https://www.nature.com/articles/s41588-022-01048-5).
+
+This is the oracle model used for evaluation against D3 generated sequences.
+It predicts enhancer activity for both developmental and housekeeping promoters.
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
+import pytorch_lightning as pl
+import numpy as np
+import random
+import h5py
+import os
+from scipy import stats
+from pytorch_lightning import loggers as pl_loggers
+import tqdm
+from filelock import FileLock
+from typing import Any, Dict, Optional
+from sklearn.metrics import roc_auc_score, average_precision_score
+
 
 class DeepSTARR(nn.Module):
     """DeepSTARR model from de Almeida et al., 2022; 
@@ -146,89 +169,74 @@ class DeepSTARR(nn.Module):
         return y_pred
 
 
-#################
-
-
-from typing import Any
-from pytorch_lightning.utilities.types import EVAL_DATALOADERS
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from sklearn.metrics import roc_auc_score, average_precision_score
-#import tqdm
-import numpy as np
-import random
-import h5py
-import os
-from scipy import stats
-
-import pytorch_lightning as pl
-#from lightning.pytorch import loggers as pl_loggers
-from pytorch_lightning import loggers as pl_loggers
-#import deepstarr_model 
-#import deepstarr_model_with_init 
-import tqdm
-#import torchsummary
+# =============================================================================
+# PyTorch Lightning Integration
+# =============================================================================
 
 def get_github_main_directory(reponame='DALdna'):
-    currdir=os.getcwd()
-    dir=''
+    """Get the main directory path for the given repository name."""
+    currdir = os.getcwd()
+    dir = ''
     for dirname in currdir.split('/'):
-        dir+=dirname+'/'
-        if dirname==reponame: break
+        dir += dirname + '/'
+        if dirname == reponame:
+            break
     return dir
 
-def key_with_low(key_list,low):
-    the_key=''
-    for key in key_list:
-        if key.lower()==low: the_key=key
-    return the_key
 
-from filelock import FileLock 
+def key_with_low(key_list, low):
+    """Find key in list that matches lowercase string."""
+    the_key = ''
+    for key in key_list:
+        if key.lower() == low:
+            the_key = key
+    return the_key 
 
 class PL_DeepSTARR(pl.LightningModule):
+    """PyTorch Lightning wrapper for DeepSTARR model.
+    
+    This class provides training, validation, and testing functionality
+    for the DeepSTARR oracle model used in D3 evaluations.
+    """
+    
     def __init__(self,
-                 batch_size=128, #original: 128, #20, #50, #100, #128,
-                 train_max_epochs=100, #my would-be-choice: 50,
-                 patience=10, #10, #100, #20, #patience=10,
-                 min_delta=0.001, #min_delta=0.001,
-                 input_h5_file='DeepSTARR_data.h5', #Originally created as: cp Orig_DeepSTARR_1dim.h5 DeepSTARRdev.h5
-                 lr=0.002, #most likely: 0.001, #0.002 From Paper
-                 initial_ds=True,
-
-                 weight_decay=1e-6, #1e-6, #1e-6, #0.0, #1e-6, #Stage0 # WEIGHT DECAY: L2 penalty: https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
-                 min_lr=0.0, #default when not present (configure_optimizer in evoaug_analysis_utils_AC.py)                                                     #DSRR
-                 lr_patience=10, #1, #2 #,100, #10, #5
-                 decay_factor=0.1, #0.0 #0.1, #Stage0
-
-                 scale=0.005, # 0.001 or 0.005 according to Chandana
-
-                 initialization='kaiming_uniform', # original: 'kaiming_normal', #AC 
-                 initialize_dense=False, 
-                 ):
+                 batch_size: int = 128,
+                 train_max_epochs: int = 100,
+                 patience: int = 10,
+                 min_delta: float = 0.001,
+                 input_h5_file: str = 'DeepSTARR_data.h5',
+                 lr: float = 0.002,
+                 initial_ds: bool = True,
+                 weight_decay: float = 1e-6,
+                 min_lr: float = 0.0,
+                 lr_patience: int = 10,
+                 decay_factor: float = 0.1,
+                 scale: float = 0.005,
+                 initialization: str = 'kaiming_uniform',
+                 initialize_dense: bool = False):
         super().__init__()
-        self.scale=scale
-        self.model=DeepSTARR(output_dim=2) #, initialization=initialization, initialize_dense=initialize_dense) #.to(device) #goodold
-        self.name='DeepSTARR'
-        # self.task_type='single_task_regression'
-        self.metric_names=['PCC','Spearman']
-        self.initial_ds=initial_ds
-
-        self.batch_size=batch_size
-        self.train_max_epochs=train_max_epochs
-        self.patience=patience
-        self.lr=lr
-        self.min_delta=min_delta #for trainer, but accessible as an attribute if needed                                                     #DSRR
-        self.weight_decay=weight_decay
-
-        #""
-        self.min_lr=min_lr 
-        self.lr_patience=lr_patience 
-        self.decay_factor=decay_factor 
-        #""
-
-        self.input_h5_file=input_h5_file
+        self.save_hyperparameters()
+        
+        # Model configuration
+        self.scale = scale
+        self.model = DeepSTARR(output_dim=2)
+        self.name = 'DeepSTARR'
+        self.metric_names = ['PCC', 'Spearman']
+        self.initial_ds = initial_ds
+        
+        # Training configuration
+        self.batch_size = batch_size
+        self.train_max_epochs = train_max_epochs
+        self.patience = patience
+        self.lr = lr
+        self.min_delta = min_delta
+        self.weight_decay = weight_decay
+        self.min_lr = min_lr
+        self.lr_patience = lr_patience
+        self.decay_factor = decay_factor
+        
+        # Data configuration
+        self.input_h5_file = input_h5_file
         data = h5py.File(input_h5_file, 'r')
         if initial_ds:
             self.X_train = torch.tensor(np.array(data['X_train'])) #(402278, 4, 249)
@@ -249,240 +257,328 @@ class PL_DeepSTARR(pl.LightningModule):
             self.X_valid=data['X_valid']
             self.y_valid=data['Y_valid']
 
-    #""
-    def training_step(self, batch, batch_idx): #QUIQUIURG
-        self.model.train() 
-        inputs, labels = batch 
-        loss_fn = nn.MSELoss() #.to(device)
-        outputs=self.model(inputs)
-        loss = loss_fn(outputs, labels)                                                     #DSRR
-
-        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)                                                     #DSRR
-
+    def training_step(self, batch, batch_idx):
+        """Training step for one batch."""
+        self.model.train()
+        inputs, labels = batch
+        loss_fn = nn.MSELoss()
+        outputs = self.model(inputs)
+        loss = loss_fn(outputs, labels)
+        
+        self.log("train_loss", loss, on_step=False, on_epoch=True, 
+                prog_bar=True, logger=True, sync_dist=True)
+        
         return loss
-    #""
         
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=self.lr_patience, min_lr=self.min_lr, factor=self.decay_factor)                                                     #DSRR
-        #return optimizer
-        return {"optimizer": optimizer, "lr_scheduler": {"scheduler":scheduler, "monitor": "val_loss"}} 
+        """Configure optimizer and learning rate scheduler."""
+        optimizer = torch.optim.Adam(
+            self.parameters(), 
+            lr=self.lr, 
+            weight_decay=self.weight_decay
+        )
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, 
+            mode='min', 
+            patience=self.lr_patience, 
+            min_lr=self.min_lr, 
+            factor=self.decay_factor
+        )
+        return {
+            "optimizer": optimizer, 
+            "lr_scheduler": {
+                "scheduler": scheduler, 
+                "monitor": "val_loss"
+            }
+        } 
     
     
-    def validation_step(self, batch, batch_idx): 
+    def validation_step(self, batch, batch_idx):
+        """Validation step for one batch."""
         self.model.eval()
-        inputs, labels = batch 
-        loss_fn = nn.MSELoss() #.to(device)
-        outputs=self.model(inputs)
+        inputs, labels = batch
+        loss_fn = nn.MSELoss()
+        outputs = self.model(inputs)
         loss = loss_fn(outputs, labels)
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)                                                     #DSRR
-        out_cpu=outputs.detach().cpu()
-        lab_cpu=labels.detach().cpu()
-        pcc=torch.tensor(self.metrics(out_cpu, lab_cpu)['PCC'].mean())
-        self.log("val_pcc", pcc, on_step=False, on_epoch=True, prog_bar=True, logger=True)                                                     
-        #return loss
+        
+        self.log("val_loss", loss, on_step=False, on_epoch=True, 
+                prog_bar=True, logger=True, sync_dist=True)
+        
+        # Calculate and log PCC metric
+        out_cpu = outputs.detach().cpu()
+        lab_cpu = labels.detach().cpu()
+        pcc = torch.tensor(self.metrics(out_cpu, lab_cpu)['PCC'].mean())
+        self.log("val_pcc", pcc, on_step=False, on_epoch=True, 
+                prog_bar=True, logger=True)
 
-    def test_step(self, batch, batch_idx): 
+    def test_step(self, batch, batch_idx):
+        """Test step for one batch."""
         self.model.eval()
-        inputs, labels = batch 
-        loss_fn = nn.MSELoss() #.to(device)
-        outputs=self.model(inputs)
+        inputs, labels = batch
+        loss_fn = nn.MSELoss()
+        outputs = self.model(inputs)
         loss = loss_fn(outputs, labels)
-        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)                                                     #DSRR
-        #return loss
+        
+        self.log("test_loss", loss, on_step=False, on_epoch=True, 
+                prog_bar=True, logger=True)
     
     def metrics(self, y_score, y_true):
-        vals = []
+        """Calculate Pearson and Spearman correlation metrics."""
+        # Spearman correlation
+        spearman_vals = []
         for output_index in range(y_score.shape[1]):
-            vals.append(stats.spearmanr(y_true[:,output_index], y_score[:,output_index])[0])                                                         #DSRR
-        spearmanr_vals=np.array(vals)
-        #
-        vals = []
+            spearman_vals.append(
+                stats.spearmanr(y_true[:, output_index], y_score[:, output_index])[0]
+            )
+        spearmanr_vals = np.array(spearman_vals)
+        
+        # Pearson correlation
+        pearson_vals = []
         for output_index in range(y_score.shape[-1]):
-            vals.append(stats.pearsonr(y_true[:,output_index], y_score[:,output_index])[0] )                                                         #DSRR
-        pearsonr_vals=np.array(vals)
-        metrics={'Spearman':spearmanr_vals,'PCC':pearsonr_vals}
-        return metrics
+            pearson_vals.append(
+                stats.pearsonr(y_true[:, output_index], y_score[:, output_index])[0]
+            )
+        pearsonr_vals = np.array(pearson_vals)
+        
+        return {'Spearman': spearmanr_vals, 'PCC': pearsonr_vals}
 
-    def forward(self, x):                                                     #DSRR
+    def forward(self, x):
+        """Forward pass through the model."""
         return self.model(x)
 
-    def predict_custom(self, X, keepgrad=False): 
+    def predict_custom(self, X, keepgrad=False):
+        """Custom prediction function with batch processing."""
         self.model.eval()
-        dataloader=torch.utils.data.DataLoader(X, batch_size=self.batch_size, shuffle=False)                                                     #DSRR
-        preds=torch.empty(0)
-        if keepgrad: 
+        dataloader = torch.utils.data.DataLoader(
+            X, batch_size=self.batch_size, shuffle=False
+        )
+        preds = torch.empty(0)
+        
+        if keepgrad:
             preds = preds.to(self.device)
         else:
             preds = preds.cpu()
-            
+        
         for x in tqdm.tqdm(dataloader, total=len(dataloader)):
-            pred=self.model(x)
-            if not keepgrad: pred=pred.detach().cpu()
-            preds=torch.cat((preds,pred),axis=0)
+            pred = self.model(x)
+            if not keepgrad:
+                pred = pred.detach().cpu()
+            preds = torch.cat((preds, pred), axis=0)
+            
         return preds
 
-    def predict_custom_mcdropout(self, X,seed=41, keepgrad=False):
+    def predict_custom_mcdropout(self, X, seed=41, keepgrad=False):
+        """Prediction with Monte Carlo dropout for uncertainty estimation."""
         torch.manual_seed(seed)
         random.seed(seed)
-        np.random.seed(seed)                                                     #DSRR
+        np.random.seed(seed)
+        
         self.model.eval()
+        # Enable dropout during inference for MC dropout
         for m in self.model.modules():
-            if m.__class__.__name__.startswith('Dropout'): 
+            if m.__class__.__name__.startswith('Dropout'):
                 m.train()
-        #
-        dataloader=torch.utils.data.DataLoader(X, batch_size=self.batch_size, shuffle=False)
-        preds=torch.empty(0)
-        if keepgrad: 
+        
+        dataloader = torch.utils.data.DataLoader(
+            X, batch_size=self.batch_size, shuffle=False
+        )
+        preds = torch.empty(0)
+        
+        if keepgrad:
             preds = preds.to(self.device)
         else:
             preds = preds.cpu()
-
+        
         for x in tqdm.tqdm(dataloader, total=len(dataloader)):
-            pred=self.model(x)
-            if not keepgrad: pred=pred.detach().cpu()
-            preds=torch.cat((preds,pred),axis=0)
+            pred = self.model(x)
+            if not keepgrad:
+                pred = pred.detach().cpu()
+            preds = torch.cat((preds, pred), axis=0)
         
         return preds
 
 
+# =============================================================================
+# Training Functions
+# =============================================================================
 
 
+def training_with_PL(chosen_model: str, chosen_dataset: str,
+                     initial_test: bool = False, 
+                     mcdropout_test: bool = False, 
+                     verbose: bool = False, 
+                     wanted_wandb: bool = False) -> Dict[str, np.ndarray]:
+    """Train DeepSTARR model using PyTorch Lightning.
+    
+    Args:
+        chosen_model: Name of the model ('DeepSTARR')
+        chosen_dataset: Name of the dataset ('DeepSTARR_data')
+        initial_test: Whether to test before training
+        mcdropout_test: Whether to test with Monte Carlo dropout
+        verbose: Whether to print verbose output
+        wanted_wandb: Whether to use Weights & Biases logging
+        
+    Returns:
+        Dictionary containing evaluation metrics
+    """
 
-
-
-###########################################
-
-
-def training_with_PL(chosen_model, chosen_dataset,
-                     initial_test=False, mcdropout_test=False, verbose=False, wanted_wandb=False):
-
+    # Setup logging
     if wanted_wandb:
         import wandb
-        from pytorch_lightning.loggers import WandbLogger # https://docs.wandb.ai/guides/integrations/lightning
+        from pytorch_lightning.loggers import WandbLogger
         wandb_logger = WandbLogger(log_model="all")
-
-        
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"{device=} {torch.cuda.is_available()=}")
-
-    currdir=os.popen('pwd').read().replace("\n","") #os.getcwd()
-    outdir="../outputs/" #../../outputs_DALdna/"
-    log_dir=outdir+"lightning_logs_"+chosen_model+"/"
+    
+    # Setup directories and logging
+    currdir = os.popen('pwd').read().replace("\n", "")
+    outdir = "../outputs/"
+    log_dir = outdir + "lightning_logs_" + chosen_model + "/"
     tb_logger = pl_loggers.TensorBoardLogger(save_dir=log_dir)
 
-    if wanted_wandb:
-        logger_of_choice=wandb_logger
-    else:
-        logger_of_choice=tb_logger
+    logger_of_choice = wandb_logger if wanted_wandb else tb_logger
+    
+    # Initialize model
+    model = eval(f"PL_{chosen_model}(input_h5_file='./{chosen_dataset}.h5', initial_ds=True)")
 
-    #model=eval("PL_"+chosen_model+"(input_h5_file='../inputs/"+chosen_dataset+".h5', initial_ds=True)") #PERFECT OLD
-    model=eval("PL_"+chosen_model+"(input_h5_file='./"+chosen_dataset+".h5', initial_ds=True)") #PERFECT OLD
+    # Setup data loaders
+    if verbose:
+        os.system('date')
+        print(f"Training data shape: {model.X_train.shape}")
+        print(f"Training labels shape: {model.y_train.shape}")
+    
+    train_dataloader = torch.utils.data.DataLoader(
+        list(zip(model.X_train, model.y_train)), 
+        batch_size=model.batch_size, 
+        shuffle=True
+    )
+    valid_dataloader = torch.utils.data.DataLoader(
+        list(zip(model.X_valid, model.y_valid)), 
+        batch_size=model.batch_size, 
+        shuffle=False
+    )
+    test_dataloader = torch.utils.data.DataLoader(
+        list(zip(model.X_test, model.y_test)), 
+        batch_size=model.batch_size, 
+        shuffle=False
+    )
 
-    os.system('date')
-    print (model.X_train.shape)
-    print (model.y_train.shape)
-    train_dataloader=torch.utils.data.DataLoader(list(zip(model.X_train,model.y_train)), batch_size=model.batch_size, shuffle=True)
-    os.system('date')
-    valid_dataloader=torch.utils.data.DataLoader(list(zip(model.X_valid,model.y_valid)), batch_size=model.batch_size, shuffle=False) #True)
-    os.system('date')
-    test_dataloader=torch.utils.data.DataLoader(list(zip(model.X_test,model.y_test)), batch_size=model.batch_size, shuffle=False) #True)
-    os.system('date')
-
-    ckptfile="oracle_"+model.name+"_"+chosen_dataset #+".ckpt"
-    to_monitor='val_loss' 
-    callback_ckpt = pl.callbacks.ModelCheckpoint( # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.ModelCheckpoint.html
-        #gpus=1,
-        #auto_select_gpus=True,
-        monitor=to_monitor, #default is None which saves a checkpoint only for the last epoch.
+    # Setup callbacks
+    ckptfile = f"oracle_{model.name}_{chosen_dataset}"
+    to_monitor = 'val_loss'
+    
+    callback_ckpt = pl.callbacks.ModelCheckpoint(
+        monitor=to_monitor,
         mode='min',
         save_top_k=1,
         save_weights_only=True,
-        dirpath="./", #"../inputs/", #get_github_main_directory(reponame='DALdna')+"inputs/", 
-        filename=ckptfile, #comment out to verify that a different epoch is picked in the name.
+        dirpath="./",
+        filename=ckptfile,
     )
-    early_stop_callback = pl.callbacks.EarlyStopping(
-                            #monitor='val_loss',
-                            monitor=to_monitor,
-                            min_delta=model.min_delta, #https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.EarlyStopping.html
-                            patience=model.patience,
-                            verbose=False,
-                            mode='min'
-                            )
-
-    if initial_test:
-        print('predict_custom')
-        y_score=model.predict_custom(model.X_test)
-        print('y_score.shape: ',y_score.shape)
-        metrics_pretrain=model.metrics(y_score, model.y_test)
-        print(f"{metrics_pretrain=}")
-        print(f"{model(model.X_test[0:10])=}")
     
+    early_stop_callback = pl.callbacks.EarlyStopping(
+        monitor=to_monitor,
+        min_delta=model.min_delta,
+        patience=model.patience,
+        verbose=False,
+        mode='min'
+    )
+
+    # Initial testing before training
+    if initial_test:
+        print('Running initial test...')
+        y_score = model.predict_custom(model.X_test)
+        print(f'y_score.shape: {y_score.shape}')
+        metrics_pretrain = model.metrics(y_score, model.y_test)
+        print(f"Pre-training metrics: {metrics_pretrain}")
+        print(f"Sample predictions: {model(model.X_test[0:10])}")
+    
+    # Monte Carlo dropout testing
     if mcdropout_test:
+        print('Running Monte Carlo dropout test...')
         n_mc = 5
-        preds_mc=torch.zeros((n_mc,len(model.X_test)))
+        preds_mc = torch.zeros((n_mc, len(model.X_test)))
         for i in range(n_mc):
-            preds_mc[i] = model.predict_custom_mcdropout(model.X_test,
-                                                            seed=41+i).squeeze(axis=1).unsqueeze(axis=0)
-        print('predict_custom_mcdropout')
-        print('y_score.shape: ',preds_mc.shape)
-        metrics_pretrain=model.metrics(y_score, model.y_test)
-        print(f"{metrics_pretrain=}")
-        print(f"{model(model.X_test[0:10])=}")
+            preds_mc[i] = model.predict_custom_mcdropout(
+                model.X_test, seed=41+i
+            ).squeeze(axis=1).unsqueeze(axis=0)
+        print(f'MC dropout predictions shape: {preds_mc.shape}')
+        metrics_pretrain = model.metrics(y_score, model.y_test)
+        print(f"MC dropout metrics: {metrics_pretrain}")
+        print(f"Sample MC predictions: {model(model.X_test[0:10])}")
 
-    print(f"{model.device=}")
-    trainer = pl.Trainer(accelerator='cuda', devices=-1, max_epochs=model.train_max_epochs, logger=logger_of_choice, callbacks=[callback_ckpt,early_stop_callback],deterministic=True) 
-    trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=valid_dataloader) #GOODOLD
-    #os.system('mv ../inputs/'+ckptfile+'-v1.ckpt ../inputs/'+ckptfile+'.ckpt')
-    os.system('mv ./'+ckptfile+'-v1.ckpt ./'+ckptfile+'.ckpt')
-    if verbose: os.system('date')
-    y_score=model.predict_custom(model.X_test)
-    if verbose: os.system('date')
-    metrics=model.metrics(y_score, model.y_test)
-    print(metrics)
+    # Training
+    print(f"Model device: {model.device}")
+    trainer = pl.Trainer(
+        accelerator='cuda', 
+        devices=-1, 
+        max_epochs=model.train_max_epochs, 
+        logger=logger_of_choice, 
+        callbacks=[callback_ckpt, early_stop_callback],
+        deterministic=True
+    )
+    
+    trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=valid_dataloader)
+    
+    # Rename checkpoint file
+    os.system(f'mv ./{ckptfile}-v1.ckpt ./{ckptfile}.ckpt')
+    
+    # Final evaluation
+    if verbose:
+        os.system('date')
+    y_score = model.predict_custom(model.X_test)
+    if verbose:
+        os.system('date')
+    metrics = model.metrics(y_score, model.y_test)
+    print(f"Final metrics: {metrics}")
 
-    """
+    # Log to wandb if enabled
     if wanted_wandb:
+        import wandb
         wandb.log(metrics)
-    """
-
-    print(ckptfile)
+    
+    print(f"Model checkpoint saved as: {ckptfile}")
     return metrics
 
 
 
 
-##############################################################
+# =============================================================================
+# Main Execution
+# =============================================================================
 
 
-
-
-
-if __name__=='__main__':
-
-    pairlist=[
-              ['DeepSTARR', 'DeepSTARR_data'],
-
-    ] 
-
+if __name__ == '__main__':
+    """Main execution for training DeepSTARR oracle model."""
+    
+    # Define model-dataset pairs
+    pairlist = [['DeepSTARR', 'DeepSTARR_data']]
+    
     for pair in pairlist:
-                
-        chosen_model=pair[0]
-        chosen_dataset=pair[1]
-
-        #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        overall_seed=41
-        myseed=overall_seed
-        torch.manual_seed(myseed)
-        random.seed(myseed)
-        np.random.seed(myseed)
-
+        chosen_model, chosen_dataset = pair
+        
+        # Set random seeds for reproducibility
+        overall_seed = 41
+        torch.manual_seed(overall_seed)
+        random.seed(overall_seed)
+        np.random.seed(overall_seed)
+        
+        # Suppress Lightning logs
         import logging
         logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
-
-        #metrics=training_with_PL(chosen_model, chosen_dataset, initial_test=False, mcdropout_test=False, verbose=False, wanted_wandb=True)
-        metrics=training_with_PL(chosen_model, chosen_dataset, initial_test=True, mcdropout_test=False, verbose=False, wanted_wandb=False)
-
-        print("SCRIPT END")
-        print("WARNING: should I do a deep ensemble, and then take the ckpt of the best model?")
+        
+        # Train model
+        metrics = training_with_PL(
+            chosen_model, 
+            chosen_dataset, 
+            initial_test=True, 
+            mcdropout_test=False, 
+            verbose=False, 
+            wanted_wandb=False
+        )
+        
+        print("\n" + "="*50)
+        print("TRAINING COMPLETED")
+        print(f"Final metrics: {metrics}")
+        print("="*50)
