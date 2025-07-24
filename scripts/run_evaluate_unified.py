@@ -53,7 +53,7 @@ def load_test_data(dataset, data_path, batch_size):
         test_loader = DataLoader(testing_ds, batch_size=batch_size, shuffle=False, num_workers=4)
         return test_loader, X_test, y_test
         
-    elif dataset.lower() == 'mpra':
+    elif dataset.lower() == 'mpra' or dataset.lower() == 'atacseq':
         data_file = h5py.File(data_path, 'r')
         X_test = torch.tensor(np.array(data_file['x_test']).astype(np.float32)).permute(0,2,1)
         y_test = torch.tensor(np.array(data_file['y_test']).astype(np.float32))
@@ -71,7 +71,8 @@ def get_sequence_length(dataset):
     lengths = {
         'deepstarr': 249,
         'mpra': 200,
-        'promoter': 1024
+        'promoter': 1024,
+        'atacseq': 1001
     }
     return lengths.get(dataset.lower(), 249)
 
@@ -105,7 +106,7 @@ def main():
         oracle_files = {
             'deepstarr': 'oracle_DeepSTARR_DeepSTARR_data.ckpt',
             'mpra': 'oracle_mpra_mpra_data.ckpt',
-            'promoter': 'best.sei.model.pth.tar'
+            'promoter': 'best.sei.model.pth.tar' 
         }
         args.oracle_path = f"model_zoo/{args.dataset}/oracle_models/{oracle_files[args.dataset]}"
         print(f"Using auto-resolved oracle path: {args.oracle_path}")
@@ -114,7 +115,7 @@ def main():
         data_files = {
             'deepstarr': 'DeepSTARR_data.h5',
             'mpra': 'mpra_data.h5',
-            'promoter': 'promoter_data.h5'  # Update this if different
+            'promoter': 'promoter_data.h5',  # Update this if different
         }
         args.data_path = data_files[args.dataset]
         print(f"Using auto-resolved data path: {args.data_path}")
@@ -193,8 +194,11 @@ def main():
     # Calculate MSE
     sp_mse = (val_score - val_pred_score) ** 2
     mean_sp_mse = torch.mean(sp_mse).cpu()
+
+    # TODO: performance based on the expression of cell line in Y splits
+    # select for high activity - TODO: need to get the INDEXES
+    high = oracle.Y_test > 0.5
     
-    print(f"Test-sp-mse: {mean_sp_mse}")
     
     # Save results
     os.makedirs(args.output_dir, exist_ok=True)

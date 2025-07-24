@@ -34,7 +34,7 @@ def setup_logging(cfg, work_dir):
     makedirs(log_dir)
     
     loggers = []
-    
+
     # TensorBoard logger
     tb_logger = TensorBoardLogger(
         save_dir=work_dir,
@@ -48,16 +48,22 @@ def setup_logging(cfg, work_dir):
         # Convert OmegaConf to plain dict for WandB compatibility
         from omegaconf import OmegaConf
         config_dict = OmegaConf.to_yaml(cfg)
-        
+
+        # build run name for different seeds and data fractions
         fraction = getattr(cfg.training, "data_fraction", 1.0)
         fraction_str = f"frac{int(fraction*100)}" if fraction < 1.0 else "full"
         basename = cfg.wandb.get('name', os.path.basename(work_dir))
         # Use the work_dir name and append the fraction string
-        run_name = f"{basename}-{fraction_str}"
+        if hasattr(cfg, 'seed'):
+            seed_str = cfg.seed
+        else:
+            seed_str = "42"
+    
+        run_name = f"{basename}-{fraction_str}-{seed_str}"
 
         wandb_logger = WandbLogger(
-            entity=cfg.wandb.get("entity", None),
-            project=cfg.wandb.get('project', 'D3'),
+            entity=cfg.wandb.get("entity", "d3-cshl"),  # this is the default team
+            project=cfg.wandb.get('project', 'd3-ablation'),   # this is the default project
             name=run_name,
             save_dir=work_dir,
             config=OmegaConf.to_container(cfg, resolve=True),
@@ -108,7 +114,6 @@ def setup_callbacks(cfg, work_dir, dataset_name=None):
     
     return callbacks
 
-
 def setup_sp_mse_callback(cfg, dataset_name):
     """Setup SP-MSE validation callback if enabled."""
     if not hasattr(cfg, 'sp_mse_validation') or not cfg.sp_mse_validation.enabled:
@@ -121,6 +126,7 @@ def setup_sp_mse_callback(cfg, dataset_name):
     if oracle_path is None and dataset_name:
         oracle_files = {
             'deepstarr': 'oracle_DeepSTARR_DeepSTARR_data.ckpt',
+            'atacseq': 'oracle_DeepSTARR_DeepSTARR_data.ckpt',   #NOTE: is this correct?
             'mpra': 'oracle_mpra_mpra_data.ckpt',
             'promoter': 'best.sei.model.pth.tar'
         }
@@ -129,6 +135,7 @@ def setup_sp_mse_callback(cfg, dataset_name):
     if data_path is None and dataset_name:
         data_files = {
             'deepstarr': 'DeepSTARR_data.h5',
+            'atacseq': 'atacseq_data.h5',
             'mpra': 'mpra_data.h5',
             'promoter': 'promoter_data.h5'
         }
@@ -169,7 +176,7 @@ def load_from_checkpoint(checkpoint_path, model, cfg, dataset_name):
 def main():
     parser = argparse.ArgumentParser(description='PyTorch Lightning training for D3-DNA')
     parser.add_argument('--dataset', type=str, required=True,
-                       choices=['deepstarr', 'mpra', 'promoter'],
+                       choices=['deepstarr', 'mpra', 'promoter', 'atacseq'],
                        help='Dataset to train on')
     parser.add_argument('--arch', type=str, required=True,
                        choices=['Conv', 'Tran'], 
@@ -192,6 +199,10 @@ def main():
                        help='Setup everything but don\'t run training')
     parser.add_argument('--fraction_data', type=float, default=1.0,
                        help='Fraction of data to use (overrides config)')
+    parser.add_argument('--seed', type=int, default=42,
+                       help='Random seed for reproducibility')
+    parser.add_argument('--wandb_project', type=str, default=None,
+                       help='W&B project name')
     
     args = parser.parse_args()
     
@@ -220,29 +231,23 @@ def main():
             cfg.training.eval_freq = args.val_check_interval
         if args.fraction_data is not None:
             cfg.training.data_fraction = args.fraction_data
+        if args.seed is not None:
+            cfg.seed = args.seed
     
     # Setup working directory
     if args.work_dir:
         work_dir = args.work_dir
     else:
-        # Include fraction in working directory name if not using full dataset
-        if args.fraction_data < 1.0:
-            base_work_dir = f"model_zoo/{args.dataset}/lightning_runs/{args.arch}_{int(args.fraction_data*100)}"
+        # Format fraction_data for directory name
+        if args.fraction_data == 1.0:
+            fraction_str = "1"
         else:
-            base_work_dir = f"model_zoo/{args.dataset}/lightning_runs/{args.arch}"
-        
-        # Add index if directory already exists
-        work_dir = base_work_dir
-        index = 1
-        while os.path.exists(work_dir):
-            if args.fraction_data < 1.0:
-                work_dir = f"model_zoo/{args.dataset}/lightning_runs/{args.arch}_{int(args.fraction_data*100)}_{index}"
-            else:
-                work_dir = f"model_zoo/{args.dataset}/lightning_runs/{args.arch}_{index}"
-            index += 1
-    
+            fraction_str = str(args.fraction_data)
+        # Use the architecture, fraction, and seed in the directory name
+        work_dir = f"model_zoo/{args.dataset}/lightning_runs/{args.arch}_{fraction_str}_{args.seed}"
+
     makedirs(work_dir)
-    
+
     with open_dict(cfg):
         cfg.work_dir = work_dir
         cfg.dataset_name = args.dataset

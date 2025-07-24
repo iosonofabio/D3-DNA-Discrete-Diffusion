@@ -1,10 +1,10 @@
 ngpus: 2
 nnodes: 1
-tokens: 4
+tokens: 4   # this is the number of tokens in the vocabulary (nucleotides - A, C, G, T)
 training:
-  batch_size: 128
+  batch_size: 256
   accum: 1
-  n_iters: 1000000
+  n_iters: 2000000
   snapshot_freq: 50000
   log_freq: 5000 # 5000
   eval_freq: 5000
@@ -30,7 +30,7 @@ sampling:
   steps: 128
   noise_removal: true
 eval:
-  batch_size: 128
+  batch_size: 256
   perplexity: false
   perplexity_batch_size: 32
 # SP-MSE validation configuration
@@ -43,7 +43,7 @@ sp_mse_validation:
   sampling_steps: 249  # Number of sampling steps (auto-resolved if null)
   early_stopping_patience: null  # Stop training if no improvement for N validations (null = disabled)
 optim:
-  weight_decay: 0
+  weight_decay: 1e-3   # note that it's int he 1e-1 order for pretraining; 1e-2 for fine tuning
   optimizer: AdamW
   lr: 0.0003     # TRY THIS
   beta1: 0.9     # TRY THIS: from diffusion
@@ -61,11 +61,11 @@ model:
   n_blocks: 12   # TRY THIS: ith Tran, 4 is min 
   n_heads: 12
   scale_by_sigma: false
-  dropout: 0.1
+  dropout: 0.4
 wandb:
   enabled: true
-  project: d3-dna-diffusion-sc
+  project: d3-ablation
   name: deepstarr-tran-sp-mse
-  entity: alejandraduran-u-cshl
+  entity: d3-cshl
   tags: []
   notes: ""

@@ -1,14 +1,14 @@
 #!/bin/bash
 
-#SBATCH --job-name=d3-dna-diffusion-frac
-#SBATCH --output=d3-dna-diffusion-frac-%A_%a.out
-#SBATCH --error=d3-dna-diffusion-frac-%A_%a.err
-#SBATCH --time=72:00:00
+#SBATCH --job-name=d3-dna-diffusion-frac2
+#SBATCH --output=d3-dna-diffusion-frac2-%A_%a.out
+#SBATCH --error=d3-dna-diffusion-frac2-%A_%a.err
+#SBATCH --time=24:00:00
 #SBATCH --partition=gpuq
 #SBATCH --gres=gpu:h100:1
 #SBATCH --mem=64GB
 #SBATCH --qos=slow_nice
-#SBATCH --array=0-12
+#SBATCH --array=0-2
 
 source ~/.bashrc
 mamba activate d3
@@ -16,13 +16,13 @@ mamba activate d3
 cd ~/scratch/D3-DNA-Discrete-Diffusion
 
 # Define array of fraction_data values
-fraction_values=(0.25 0.5 0.75 1.0 0.25 0.5 0.75 1.0 0.25 0.5 0.75 1.0)
+fraction_values=(0.1 0.1 0.1)
 
 # Get the fraction value for this job array task
 fraction_data=${fraction_values[$SLURM_ARRAY_TASK_ID]}
 
 # Set a unique seed for each job using SLURM_ARRAY_TASK_ID
-SEED=$(( 43 + SLURM_ARRAY_TASK_ID / 4 ))
+SEED=$(( 43 + SLURM_ARRAY_TASK_ID ))
 
 # Set max_steps based on fraction_data
 if [[ "$fraction_data" == "1.0" ]]; then

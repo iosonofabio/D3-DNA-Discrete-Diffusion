@@ -185,6 +185,20 @@ def get_datasets(dataset='deepstarr'):
         y_valid = torch.tensor(np.array(dataset_file['y_valid']).astype(np.float32))
         train_set = TensorDataset(x_train, y_train)
         valid_set = TensorDataset(x_valid, y_valid)
+
+    elif dataset.lower() == 'atacseq':
+        # MPRA
+        filepath = os.path.join('model_zoo', 'atacseq', 'atacseq_data.h5')
+        dataset_file = h5py.File(filepath, 'r')
+        x_train = torch.tensor(np.array(dataset_file['x_train']).astype(np.float32)).permute(0,2,1)
+        x_train = torch.argmax(x_train, dim=1)
+        y_train = torch.tensor(np.array(dataset_file['y_train']).astype(np.float32))
+        x_valid = torch.tensor(np.array(dataset_file['x_valid']).astype(np.float32)).permute(0,2,1)
+        x_valid = torch.argmax(x_valid, dim=1)
+        y_valid = torch.tensor(np.array(dataset_file['y_valid']).astype(np.float32))
+        train_set = TensorDataset(x_train, y_train)
+        valid_set = TensorDataset(x_valid, y_valid)
+        
         
     elif dataset.lower() == 'promoter':
         # Promoter - use dataset objects directly
@@ -192,7 +206,7 @@ def get_datasets(dataset='deepstarr'):
         valid_set = PromoterDataset(n_tsses=100000, rand_offset=0, split='test')
         
     else:
-        raise ValueError(f"Unknown dataset: {dataset}. Supported datasets: 'deepstarr', 'mpra', 'promoter'")
+        raise ValueError(f"Unknown dataset: {dataset}. Supported datasets: 'deepstarr', 'mpra', 'promoter', 'atacseq'")
 
     return train_set, valid_set
 

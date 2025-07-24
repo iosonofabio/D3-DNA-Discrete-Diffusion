@@ -269,9 +269,14 @@ class D3DataModule(pl.LightningDataModule):
 
     def train_dataloader(self):
         from torch.utils.data import DataLoader
+        # Handle ngpus == 0 (CPU only)
+        if getattr(self.cfg, 'ngpus', 0) == 0:
+            batch_size = self.cfg.training.batch_size
+        else:
+            batch_size = self.cfg.training.batch_size // (self.cfg.ngpus * self.cfg.training.accum)
         return DataLoader(
             self.train_ds,
-            batch_size=self.cfg.training.batch_size // (self.cfg.ngpus * self.cfg.training.accum),
+            batch_size=batch_size,
             num_workers=2,
             pin_memory=True,
             shuffle=True,
@@ -280,9 +285,14 @@ class D3DataModule(pl.LightningDataModule):
     
     def val_dataloader(self):
         from torch.utils.data import DataLoader
+        # Handle ngpus == 0 (CPU only)
+        if getattr(self.cfg, 'ngpus', 0) == 0:
+            batch_size = self.cfg.eval.batch_size
+        else:
+            batch_size = self.cfg.eval.batch_size // (self.cfg.ngpus * self.cfg.training.accum)
         return DataLoader(
             self.val_ds,
-            batch_size=self.cfg.eval.batch_size // (self.cfg.ngpus * self.cfg.training.accum),
+            batch_size=batch_size,
             num_workers=2,
             pin_memory=True,
             shuffle=False,
@@ -427,6 +437,9 @@ def create_trainer_from_config(cfg, dataset_name: Optional[str] = None, **traine
             'strategy': 'ddp_find_unused_parameters_true',  # More robust for cluster environments
             'sync_batchnorm': True,
         })
+    elif getattr(cfg, 'ngpus', 0) == 0:
+        default_trainer_args['accelerator'] = 'cpu'
+        default_trainer_args['devices'] = 1
     else:
         default_trainer_args['devices'] = 1
     
