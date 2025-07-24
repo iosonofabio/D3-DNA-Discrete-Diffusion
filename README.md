@@ -242,11 +242,13 @@ Evaluation metrics include:
 ## 📜 Citation
 
 ```bibtex
-@article{d3dna2024,
-  title={Designing DNA With Tunable Regulatory Activity Using Discrete Diffusion},
-  author={Your Name et al.},
-  journal={Your Journal},
-  year={2024}
+@article{sarkar2024designing,
+  title={Designing DNA With Tunable Regulatory Activity Using Score-Entropy Discrete Diffusion},
+  author={Sarkar, Anirban and Kang, Yijie and Somia, Nirali and Mantilla, Pablo and Zhou, Jessica Lu and Nagai, Masayuki and Tang, Ziqi and Zhao, Chris and Koo, Peter},
+  journal={bioRxiv},
+  pages={2024--05},
+  year={2024},
+  publisher={Cold Spring Harbor Laboratory}
 }
 ```
 
