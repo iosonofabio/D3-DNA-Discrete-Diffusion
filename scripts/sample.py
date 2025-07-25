@@ -23,7 +23,6 @@ from torch.utils.data import DataLoader
 
 # Import the proper sampling functionality
 from scripts import sampling
-from utils.load_model import load_model_local
 
 
 class BaseSampler:
@@ -41,18 +40,20 @@ class BaseSampler:
         # Default token to nucleotide mapping (can be overridden by subclasses)
         self.token_to_nucleotide = {0: 'A', 1: 'C', 2: 'G', 3: 'T'}
         
-    def create_model(self, config: OmegaConf, architecture: str):
+    def load_model(self, checkpoint_path: str, config: OmegaConf, architecture: str = 'transformer'):
         """
-        Create the model for sampling. Must be implemented by subclasses.
+        Load model for the dataset. Must be implemented by subclasses.
+        Each dataset implements its own simple model loading logic.
         
         Args:
+            checkpoint_path: Path to specific checkpoint file
             config: Configuration object
-            architecture: Architecture name (e.g., 'transformer', 'convolutional')
+            architecture: Architecture type ('transformer', 'convolutional')
             
         Returns:
-            Model instance
+            Tuple of (model, graph, noise) needed for sampling
         """
-        raise NotImplementedError("Subclasses must implement create_model()")
+        raise NotImplementedError("Subclasses must implement load_model()")
     
     def get_sequence_length(self, config: OmegaConf) -> int:
         """
@@ -99,24 +100,25 @@ class BaseSampler:
             # Fallback for datasets like DeepSTARR with 2 activities
             return torch.randn(num_samples, 2, device=self.device)
     
-    def sample_sequences_with_pc_sampler(self, model_path: str, config: OmegaConf, 
-                                       num_samples: int, steps: int, 
+    def sample_sequences_with_pc_sampler(self, checkpoint_path: str, config: OmegaConf, 
+                                       num_samples: int, steps: int, architecture: str = 'transformer',
                                        conditioning_labels: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Sample sequences using the proper PC sampler.
         
         Args:
-            model_path: Path to model directory (for load_model_local)
+            checkpoint_path: Path to checkpoint file
             config: Configuration object
             num_samples: Number of sequences to sample
             steps: Number of sampling steps
+            architecture: Architecture type
             conditioning_labels: Optional conditioning labels (if None, generates random)
             
         Returns:
             Sampled sequences tensor
         """
-        # Load model using the proper load_model_local function
-        model, graph, noise = load_model_local(model_path, self.device)
+        # Load model using dataset-specific method
+        model, graph, noise = self.load_model(checkpoint_path, config, architecture)
         model.eval()
         
         sequence_length = self.get_sequence_length(config)
@@ -189,17 +191,18 @@ class BaseSampler:
         else:
             raise ValueError(f"Unsupported format: {format}")
     
-    def sample_and_save(self, model_path: str, config: OmegaConf, num_samples: int, steps: int,
-                       conditioning_labels: Optional[torch.Tensor] = None,
+    def sample_and_save(self, checkpoint_path: str, config: OmegaConf, num_samples: int, steps: int,
+                       architecture: str = 'transformer', conditioning_labels: Optional[torch.Tensor] = None,
                        output_path: Optional[str] = None, format: str = 'npz') -> Dict[str, Any]:
         """
         Main sampling method - just samples and saves (no evaluation).
         
         Args:
-            model_path: Path to model directory
+            checkpoint_path: Path to checkpoint file
             config: Configuration object
             num_samples: Number of sequences to sample
             steps: Number of sampling steps
+            architecture: Architecture type
             conditioning_labels: Optional conditioning labels
             output_path: Output file path (optional, auto-generated if None)
             format: Output format ('npz', 'fasta', 'csv')
@@ -211,7 +214,7 @@ class BaseSampler:
         
         # Sample sequences
         sampled_sequences = self.sample_sequences_with_pc_sampler(
-            model_path, config, num_samples, steps, conditioning_labels
+            checkpoint_path, config, num_samples, steps, architecture, conditioning_labels
         )
         
         results = {
@@ -223,7 +226,9 @@ class BaseSampler:
         
         # Save sequences
         if output_path is None:
-            output_path = os.path.join(model_path, f"sample.{format}")
+            # Extract directory from checkpoint path for output
+            checkpoint_dir = os.path.dirname(checkpoint_path)
+            output_path = os.path.join(checkpoint_dir, f"sample.{format}")
         
         self.save_sequences(sampled_sequences, output_path, format)
         results['output_path'] = output_path
@@ -234,7 +239,8 @@ class BaseSampler:
 def parse_base_args():
     """Parse common command line arguments for sampling scripts."""
     parser = argparse.ArgumentParser(description='D3 Sampling Script')
-    parser.add_argument('--model_path', required=True, help='Path to model directory')
+    parser.add_argument('--checkpoint', required=True, help='Path to model checkpoint file')
+    parser.add_argument('--architecture', required=True, choices=['transformer', 'convolutional'], help='Model architecture')
     parser.add_argument('--config', help='Path to config file (optional, dataset may provide default)')
     parser.add_argument('--num_samples', type=int, default=1000, help='Number of samples to generate')
     parser.add_argument('--steps', type=int, help='Number of sampling steps (defaults to sequence length)')
@@ -253,8 +259,8 @@ def main_sample(sampler: BaseSampler, args):
         args: Parsed command line arguments
     """
     # Validate inputs
-    if not os.path.exists(args.model_path):
-        print(f"Error: Model path not found: {args.model_path}")
+    if not os.path.exists(args.checkpoint):
+        print(f"Error: Checkpoint not found: {args.checkpoint}")
         return 1
     
     # Load configuration (required)
@@ -272,10 +278,11 @@ def main_sample(sampler: BaseSampler, args):
     
     # Run sampling only (no evaluation)
     results = sampler.sample_and_save(
-        model_path=args.model_path,
+        checkpoint_path=args.checkpoint,
         config=config,
         num_samples=args.num_samples,
         steps=steps,
+        architecture=args.architecture,
         output_path=args.output,
         format=args.format
     )

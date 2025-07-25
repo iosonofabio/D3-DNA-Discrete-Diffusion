@@ -33,68 +33,20 @@ class BaseEvaluator:
         self.dataset_name = dataset_name
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
-    def create_model(self, config: OmegaConf, architecture: str):
+    def load_model(self, checkpoint_path: str, config: OmegaConf, architecture: str = 'transformer'):
         """
-        Create the model for evaluation. Must be implemented by subclasses.
+        Load model for the dataset. Must be implemented by subclasses.
+        Each dataset implements its own simple model loading logic.
         
         Args:
+            checkpoint_path: Path to specific checkpoint file
             config: Configuration object
-            architecture: Architecture name (e.g., 'transformer', 'convolutional')
+            architecture: Architecture type ('transformer', 'convolutional')
             
         Returns:
-            Model instance
+            Tuple of (model, graph, noise) needed for sampling/evaluation
         """
-        raise NotImplementedError("Subclasses must implement create_model()")
-    
-    def load_model_from_checkpoint(self, checkpoint_path: str, config: OmegaConf, architecture: str):
-        """
-        Load model from checkpoint. Uses the subclass's create_model method.
-        
-        Args:
-            checkpoint_path: Path to checkpoint file
-            config: Configuration object
-            architecture: Architecture name
-            
-        Returns:
-            Loaded model
-        """
-        print(f"Loading {self.dataset_name} model from {checkpoint_path}")
-        
-        # Create model using subclass implementation
-        model = self.create_model(config, architecture)
-        model.to(self.device)
-        
-        # Load checkpoint weights
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
-        
-        if checkpoint_path.endswith('.ckpt'):
-            # Lightning checkpoint
-            if 'state_dict' in checkpoint:
-                state_dict = {}
-                for k, v in checkpoint['state_dict'].items():
-                    if k.startswith('score_model.'):
-                        k = k[12:]  # Remove 'score_model.' prefix
-                    elif k.startswith('model.'):
-                        k = k[6:]  # Remove 'model.' prefix
-                    state_dict[k] = v
-            else:
-                state_dict = checkpoint
-        else:
-            # Regular checkpoint
-            if 'model' in checkpoint:
-                state_dict = checkpoint['model']
-            else:
-                state_dict = checkpoint
-        
-        # Load weights
-        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
-        if missing_keys:
-            print(f"Warning: Missing keys: {missing_keys}")
-        if unexpected_keys:
-            print(f"Warning: Unexpected keys: {unexpected_keys}")
-            
-        print(f"✓ {self.dataset_name} model loaded successfully")
-        return model
+        raise NotImplementedError("Subclasses must implement load_model()")
     
     def create_dataloader(self, config: OmegaConf, split: str = 'test', batch_size: Optional[int] = None):
         """
@@ -110,60 +62,6 @@ class BaseEvaluator:
         """
         raise NotImplementedError("Subclasses must implement create_dataloader()")
     
-    def compute_basic_metrics(self, model, dataloader, config: OmegaConf) -> Dict[str, float]:
-        """
-        Compute basic evaluation metrics (loss, perplexity, etc.).
-        
-        Args:
-            model: Trained model
-            dataloader: Data loader
-            config: Configuration object
-            
-        Returns:
-            Dictionary of metrics
-        """
-        model.eval()
-        
-        total_loss = 0.0
-        num_batches = 0
-        num_samples = 0
-        
-        with torch.no_grad():
-            for batch in tqdm(dataloader, desc="Computing basic metrics"):
-                try:
-                    if len(batch) == 2:
-                        inputs, targets = batch
-                        inputs = inputs.to(self.device)
-                        targets = targets.to(self.device)
-                        
-                        batch_size = inputs.shape[0]
-                        
-                        # Generate random noise levels for evaluation
-                        sigma = torch.rand(batch_size, device=self.device) * 20
-                        
-                        # Model prediction
-                        output = model(inputs, targets, train=False, sigma=sigma)
-                        
-                        # Compute loss (simplified)
-                        loss = torch.mean((output - inputs.float()) ** 2)
-                        
-                        total_loss += loss.item() * batch_size
-                        num_samples += batch_size
-                        num_batches += 1
-                        
-                except Exception as e:
-                    print(f"Warning: Error in batch {num_batches}: {e}")
-                    num_batches += 1
-                    continue
-        
-        avg_loss = total_loss / num_samples if num_samples > 0 else float('inf')
-        
-        return {
-            'average_loss': avg_loss,
-            'num_batches': num_batches,
-            'num_samples': num_samples,
-            'perplexity': torch.exp(torch.tensor(avg_loss)).item() if avg_loss < 10 else float('inf')
-        }
     
     def load_oracle_model(self, oracle_checkpoint: str, data_path: str):
         """
@@ -180,25 +78,25 @@ class BaseEvaluator:
         print(f"Warning: Oracle evaluation not implemented for {self.dataset_name}")
         return None
     
-    def sample_sequences_for_evaluation(self, model_path: str, config: OmegaConf, 
-                                       dataloader, num_steps: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def sample_sequences_for_evaluation(self, checkpoint_path: str, config: OmegaConf, 
+                                       dataloader, num_steps: int, architecture: str = 'transformer') -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample sequences for evaluation using PC sampler.
         
         Args:
-            model_path: Path to model directory
+            checkpoint_path: Path to checkpoint file
             config: Configuration object  
             dataloader: DataLoader for getting target labels
             num_steps: Number of sampling steps
+            architecture: Architecture type
             
         Returns:
             Tuple of (sampled_sequences, target_labels)
         """
         from scripts import sampling
-        from utils.load_model import load_model_local
         
-        # Load model using the proper load_model_local function
-        model, graph, noise = load_model_local(model_path, self.device)
+        # Load model using dataset-specific method  
+        model, graph, noise = self.load_model(checkpoint_path, config, architecture)
         model.eval()
         
         # Get sequence length
@@ -315,21 +213,22 @@ class BaseEvaluator:
             'sp_mse': 0.0
         }
     
-    def evaluate_with_sampling(self, model_path: str, config: OmegaConf, 
+    def evaluate_with_sampling(self, checkpoint_path: str, config: OmegaConf, 
                               oracle_checkpoint: str, data_path: str,
                               split: str = 'test', steps: Optional[int] = None, 
-                              batch_size: Optional[int] = None) -> Dict[str, Any]:
+                              batch_size: Optional[int] = None, architecture: str = 'transformer') -> Dict[str, Any]:
         """
         Evaluate model by sampling sequences and computing SP-MSE with oracle.
         
         Args:
-            model_path: Path to model directory
+            checkpoint_path: Path to checkpoint file
             config: Configuration object
             oracle_checkpoint: Path to oracle model checkpoint
             data_path: Path to data file needed by oracle
             split: Dataset split to evaluate on
             steps: Number of sampling steps (defaults to sequence length)
             batch_size: Batch size for evaluation (optional)
+            architecture: Architecture type
             
         Returns:
             Dictionary of evaluation results including SP-MSE
@@ -347,7 +246,7 @@ class BaseEvaluator:
         # Sample sequences using PC sampler
         print(f"Sampling sequences with PC sampler ({steps} steps)...")
         sampled_sequences, target_labels = self.sample_sequences_for_evaluation(
-            model_path, config, dataloader, steps
+            checkpoint_path, config, dataloader, steps, architecture
         )
         
         # Load oracle model
@@ -383,16 +282,16 @@ class BaseEvaluator:
         
         return results
 
-    def evaluate(self, checkpoint_path: str, config: OmegaConf, architecture: str,
+    def evaluate(self, checkpoint_path: str, config: OmegaConf, architecture: str = 'transformer',
                  split: str = 'test', oracle_checkpoint: Optional[str] = None,
                  data_path: Optional[str] = None, batch_size: Optional[int] = None) -> Dict[str, Any]:
         """
-        Main evaluation method (basic metrics only, no sampling).
+        Main evaluation method - now deprecated. Use evaluate_with_sampling instead.
         
         Args:
-            checkpoint_path: Path to model checkpoint
+            checkpoint_path: Path to checkpoint file
             config: Configuration object
-            architecture: Architecture name
+            architecture: Architecture type
             split: Dataset split to evaluate on
             oracle_checkpoint: Path to oracle model checkpoint (optional)
             data_path: Path to data file (optional, needed for oracle)
@@ -401,23 +300,24 @@ class BaseEvaluator:
         Returns:
             Dictionary of evaluation results
         """
-        # Load model
-        model = self.load_model_from_checkpoint(checkpoint_path, config, architecture)
+        print("Warning: evaluate() method is deprecated. Use evaluate_with_sampling() instead.")
+        print("This method only performs oracle evaluation without sampling.")
+        
+        if not oracle_checkpoint:
+            return {'error': 'oracle_checkpoint required for evaluation'}
+        
+        # Load model using dataset-specific method
+        model, _, _ = self.load_model(checkpoint_path, config, architecture)
         
         # Create dataloader
         dataloader = self.create_dataloader(config, split, batch_size)
         
         print(f"Evaluating {self.dataset_name} on {split} split...")
         
-        # Compute basic metrics
-        metrics = self.compute_basic_metrics(model, dataloader, config)
-        
-        # Oracle evaluation if requested
-        if oracle_checkpoint:
-            print("Loading oracle model for specialized evaluation...")
-            oracle_model = self.load_oracle_model(oracle_checkpoint, data_path or "")
-            oracle_metrics = self.evaluate_with_oracle(model, oracle_model, dataloader, config)
-            metrics.update(oracle_metrics)
+        # Oracle evaluation only
+        print("Loading oracle model for specialized evaluation...")
+        oracle_model = self.load_oracle_model(oracle_checkpoint, data_path or "")
+        metrics = self.evaluate_with_oracle(model, oracle_model, dataloader, config)
         
         return metrics
     
@@ -443,15 +343,15 @@ class BaseEvaluator:
 
 def parse_base_args():
     """Parse common command line arguments for evaluation scripts."""
-    parser = argparse.ArgumentParser(description='D3 Evaluation Script')
-    parser.add_argument('--architecture', required=True, help='Architecture (transformer or convolutional)')
-    parser.add_argument('--checkpoint', required=True, help='Path to trained model checkpoint')
+    parser = argparse.ArgumentParser(description='D3 Evaluation Script - Sampling + SP-MSE')
+    parser.add_argument('--checkpoint', required=True, help='Path to model checkpoint file')
+    parser.add_argument('--architecture', required=True, choices=['transformer', 'convolutional'], help='Model architecture')
+    parser.add_argument('--oracle_checkpoint', required=True, help='Path to oracle model checkpoint (required for SP-MSE)')
+    parser.add_argument('--data_path', required=True, help='Path to data file (required for oracle models)')
     parser.add_argument('--config', help='Path to config file (optional, dataset may provide default)')
     parser.add_argument('--split', choices=['train', 'val', 'test'], default='test', help='Dataset split to evaluate on')
+    parser.add_argument('--steps', type=int, help='Number of sampling steps (defaults to sequence length)')
     parser.add_argument('--output', help='Output file for results')
-    parser.add_argument('--use_oracle', action='store_true', help='Use oracle model for evaluation')
-    parser.add_argument('--oracle_checkpoint', help='Path to oracle model checkpoint')
-    parser.add_argument('--data_path', help='Path to data file (needed for oracle models)')
     parser.add_argument('--batch_size', type=int, help='Batch size for evaluation')
     
     return parser
@@ -460,6 +360,7 @@ def parse_base_args():
 def main_evaluate(evaluator: BaseEvaluator, args):
     """
     Common main evaluation function that can be used by dataset-specific scripts.
+    Now focuses on sampling + SP-MSE evaluation only.
     
     Args:
         evaluator: Dataset-specific evaluator instance
@@ -470,6 +371,14 @@ def main_evaluate(evaluator: BaseEvaluator, args):
         print(f"Error: Checkpoint not found: {args.checkpoint}")
         return 1
     
+    if not args.oracle_checkpoint:
+        print("Error: --oracle_checkpoint is required for SP-MSE evaluation")
+        return 1
+    
+    if not args.data_path:
+        print("Error: --data_path is required for SP-MSE evaluation")
+        return 1
+    
     # Load configuration (required)
     if not args.config:
         print("Error: Config file is required. Please provide --config path/to/config.yaml")
@@ -477,15 +386,16 @@ def main_evaluate(evaluator: BaseEvaluator, args):
     
     config = OmegaConf.load(args.config)
     
-    # Run evaluation
-    metrics = evaluator.evaluate(
+    # Run evaluation with sampling (the main evaluation method now)
+    metrics = evaluator.evaluate_with_sampling(
         checkpoint_path=args.checkpoint,
         config=config,
-        architecture=args.architecture,
-        split=args.split,
-        oracle_checkpoint=args.oracle_checkpoint if args.use_oracle else None,
+        oracle_checkpoint=args.oracle_checkpoint,
         data_path=args.data_path,
-        batch_size=args.batch_size
+        split=args.split,
+        steps=getattr(args, 'steps', None),
+        batch_size=args.batch_size,
+        architecture=args.architecture
     )
     
     # Print results

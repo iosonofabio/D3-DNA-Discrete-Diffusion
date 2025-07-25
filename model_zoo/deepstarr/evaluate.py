@@ -22,7 +22,6 @@ sys.path.insert(0, str(project_root))
 
 # Import base framework and DeepSTARR-specific components
 from scripts.evaluate import BaseEvaluator, parse_base_args, main_evaluate
-from model_zoo.deepstarr.models import DeepSTARRTransformerModel, DeepSTARRConvolutionalModel
 from model_zoo.deepstarr.data import get_deepstarr_datasets
 from model_zoo.deepstarr.deepstarr import PL_DeepSTARR
 
@@ -33,14 +32,11 @@ class DeepSTARREvaluator(BaseEvaluator):
     def __init__(self):
         super().__init__("DeepSTARR")
     
-    def create_model(self, config: OmegaConf, architecture: str):
-        """Create DeepSTARR-specific model."""
-        if architecture.lower() == 'transformer':
-            return DeepSTARRTransformerModel(config)
-        elif architecture.lower() == 'convolutional':
-            return DeepSTARRConvolutionalModel(config)
-        else:
-            raise ValueError(f"Unsupported architecture: {architecture}")
+    def load_model(self, checkpoint_path: str, config: OmegaConf, architecture: str = 'transformer'):
+        """Load DeepSTARR model using dataset-specific model loading."""
+        from model_zoo.deepstarr.models import load_trained_model
+        
+        return load_trained_model(checkpoint_path, config, architecture, self.device)
     
     def create_dataloader(self, config: OmegaConf, split: str = 'test', batch_size: Optional[int] = None):
         """Create DeepSTARR dataloader."""
@@ -108,9 +104,9 @@ class DeepSTARREvaluator(BaseEvaluator):
             return torch.zeros(100, 249, 4)  # One-hot encoded sequences
 
 
-def load_config(architecture: str):
-    """Load DeepSTARR configuration."""
-    config_file = Path(__file__).parent / 'configs' / f'{architecture}.yaml'
+def load_default_config():
+    """Load DeepSTARR default configuration (transformer)."""
+    config_file = Path(__file__).parent / 'configs' / 'transformer.yaml'
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_file}")
     return OmegaConf.load(config_file)
@@ -120,22 +116,12 @@ def main():
     """Main evaluation function using base framework."""
     # Parse arguments using base framework
     parser = parse_base_args()
-    parser.add_argument('--model_path', required=True, help='Path to model directory (required for evaluation)')
-    parser.add_argument('--steps', type=int, help='Number of sampling steps (defaults to sequence length)')
     args = parser.parse_args()
-    
-    # Validate required arguments for evaluation
-    if not args.oracle_checkpoint:
-        print("Error: --oracle_checkpoint is required for evaluation")
-        return 1
-    if not args.data_path:
-        print("Error: --data_path is required for evaluation")
-        return 1
     
     # Load config if not provided
     if not args.config:
         try:
-            config_path = Path(__file__).parent / 'configs' / f'{args.architecture}.yaml'
+            config_path = Path(__file__).parent / 'configs' / 'transformer.yaml'
             if config_path.exists():
                 args.config = str(config_path)
                 print(f"Using default config: {args.config}")
@@ -152,13 +138,14 @@ def main():
     
     # Run evaluation (always includes sampling + SP-MSE computation)
     metrics = evaluator.evaluate_with_sampling(
-        model_path=args.model_path,
+        checkpoint_path=args.checkpoint,
         config=config,
         oracle_checkpoint=args.oracle_checkpoint,
         data_path=args.data_path,
         split=args.split,
         steps=args.steps,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        architecture=args.architecture
     )
     
     # Print and save results

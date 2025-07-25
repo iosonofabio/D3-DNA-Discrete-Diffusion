@@ -22,7 +22,6 @@ sys.path.insert(0, str(project_root))
 
 # Import base framework and DeepSTARR-specific components
 from scripts.sample import BaseSampler, parse_base_args, main_sample
-from model_zoo.deepstarr.models import DeepSTARRTransformerModel, DeepSTARRConvolutionalModel
 from model_zoo.deepstarr.data import get_deepstarr_datasets
 from model_zoo.deepstarr.deepstarr import PL_DeepSTARR
 
@@ -33,14 +32,11 @@ class DeepSTARRSampler(BaseSampler):
     def __init__(self):
         super().__init__("DeepSTARR")
     
-    def create_model(self, config: OmegaConf, architecture: str):
-        """Create DeepSTARR-specific model."""
-        if architecture.lower() == 'transformer':
-            return DeepSTARRTransformerModel(config)
-        elif architecture.lower() == 'convolutional':
-            return DeepSTARRConvolutionalModel(config)
-        else:
-            raise ValueError(f"Unsupported architecture: {architecture}")
+    def load_model(self, checkpoint_path: str, config: OmegaConf, architecture: str = 'transformer'):
+        """Load DeepSTARR model using dataset-specific model loading."""
+        from model_zoo.deepstarr.models import load_trained_model
+        
+        return load_trained_model(checkpoint_path, config, architecture, self.device)
     
     def get_sequence_length(self, config: OmegaConf) -> int:
         """Get DeepSTARR sequence length."""
@@ -54,9 +50,9 @@ class DeepSTARRSampler(BaseSampler):
         return labels
 
 
-def load_config(architecture: str):
-    """Load DeepSTARR configuration."""
-    config_file = Path(__file__).parent / 'configs' / f'{architecture}.yaml'
+def load_default_config():
+    """Load DeepSTARR default configuration (transformer)."""
+    config_file = Path(__file__).parent / 'configs' / 'transformer.yaml'
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_file}")
     return OmegaConf.load(config_file)
@@ -112,10 +108,11 @@ def main():
     
     # Run sampling only (no evaluation)
     results = sampler.sample_and_save(
-        model_path=args.model_path,
+        checkpoint_path=args.checkpoint,
         config=config,
         num_samples=args.num_samples,
         steps=steps,
+        architecture=args.architecture,
         conditioning_labels=conditioning_labels,
         output_path=args.output,
         format=args.format

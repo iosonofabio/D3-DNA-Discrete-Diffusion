@@ -22,7 +22,6 @@ sys.path.insert(0, str(project_root))
 
 # Import base framework and MPRA-specific components
 from scripts.sample import BaseSampler, parse_base_args, main_sample
-from model_zoo.mpra.models import create_model
 from model_zoo.mpra.data import get_mpra_datasets
 
 
@@ -32,9 +31,11 @@ class MPRASampler(BaseSampler):
     def __init__(self):
         super().__init__("MPRA")
     
-    def create_model(self, config: OmegaConf, architecture: str):
-        """Create MPRA-specific model."""
-        return create_model(config, architecture)
+    def load_model(self, checkpoint_path: str, config: OmegaConf, architecture: str = 'transformer'):
+        """Load MPRA model using dataset-specific model loading."""
+        from model_zoo.mpra.models import load_trained_model
+        
+        return load_trained_model(checkpoint_path, config, architecture, self.device)
     
     def get_sequence_length(self, config: OmegaConf) -> int:
         """Get MPRA sequence length."""

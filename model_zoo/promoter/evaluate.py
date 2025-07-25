@@ -22,7 +22,6 @@ sys.path.insert(0, str(project_root))
 
 # Import base framework and Promoter-specific components
 from scripts.evaluate import BaseEvaluator, parse_base_args, main_evaluate
-from model_zoo.promoter.models import create_model
 from model_zoo.promoter.data import get_promoter_datasets
 from model_zoo.promoter.sei import Sei, NonStrandSpecific
 
@@ -33,9 +32,11 @@ class PromoterEvaluator(BaseEvaluator):
     def __init__(self):
         super().__init__("Promoter")
     
-    def create_model(self, config: OmegaConf, architecture: str):
-        """Create Promoter-specific model."""
-        return create_model(config, architecture)
+    def load_model(self, checkpoint_path: str, config: OmegaConf, architecture: str = 'transformer'):
+        """Load Promoter model using dataset-specific model loading."""
+        from model_zoo.promoter.models import load_trained_model
+        
+        return load_trained_model(checkpoint_path, config, architecture, self.device)
     
     def get_sequence_length(self, config: OmegaConf) -> int:
         """Get Promoter sequence length."""
