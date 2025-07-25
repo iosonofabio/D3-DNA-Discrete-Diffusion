@@ -68,35 +68,19 @@ class ConfigManager:
         
         # Resolve dataset paths
         if 'dataset' in config:
-            dataset_config = config.dataset
-            dataset_name = dataset_config.get('name', '')
-            
-            # Resolve data directory
-            if 'paths' in config and 'data_dir' in config.paths:
-                data_dir = self.base_dir / config.paths.data_dir
-            else:
-                data_dir = self.base_dir / 'model_zoo' / dataset_name
-            
-            # Update paths with resolved absolute paths
-            if 'paths' not in config:
-                config.paths = {}
-                
-            config.paths.data_dir = str(data_dir)
+            dataset_name = config.dataset.get('name', '')
             
             # Resolve data file path
-            if 'data_file' in dataset_config:
-                data_file = data_dir / dataset_config.data_file
-                config.paths.data_file = str(data_file)
+            if 'data_file' not in config.paths and not config.paths.data_file:
+                config.paths.data_file = self.base_dir / 'model_zoo' / dataset_name / 'DeepSTARR_data.h5'
                 
             # Resolve oracle model path
-            if 'oracle_model' in config.paths and config.paths.oracle_model:
-                oracle_path = data_dir / config.paths.oracle_model
-                config.paths.oracle_model = str(oracle_path)
+            if 'oracle_model' not in config.paths and not config.paths.oracle_model:
+                config.paths.oracle_model = self.base_dir / 'model_zoo' / dataset_name / 'oracle_DeepSTARR_DeepSTARR_data.ckpt'
                 
             # Resolve checkpoints directory
-            if 'checkpoints_dir' in config.paths:
-                checkpoints_dir = data_dir / config.paths.checkpoints_dir
-                config.paths.checkpoints_dir = str(checkpoints_dir)
+            if 'checkpoints_dir' not in config.paths and not config.paths.checkpoints_dir:
+                config.paths.checkpoints_dir = self.base_dir / 'model_zoo' / dataset_name / 'checkpoints'
         
         # Resolve SP-MSE validation paths if they're null (auto-resolve)
         if 'sp_mse_validation' in config:

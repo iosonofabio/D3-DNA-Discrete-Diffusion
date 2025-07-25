@@ -407,7 +407,8 @@ def training_with_PL(chosen_model: str, chosen_dataset: str,
                      initial_test: bool = False, 
                      mcdropout_test: bool = False, 
                      verbose: bool = False, 
-                     wanted_wandb: bool = False) -> Dict[str, np.ndarray]:
+                     wanted_wandb: bool = False,
+                     seed: int = 41) -> Dict[str, np.ndarray]:
     """Train DeepSTARR model using PyTorch Lightning.
     
     Args:
@@ -421,6 +422,11 @@ def training_with_PL(chosen_model: str, chosen_dataset: str,
     Returns:
         Dictionary containing evaluation metrics
     """
+
+    # Set random seeds for reproducibility
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
 
     # Setup logging
     if wanted_wandb:
@@ -557,12 +563,6 @@ if __name__ == '__main__':
     
     for pair in pairlist:
         chosen_model, chosen_dataset = pair
-        
-        # Set random seeds for reproducibility
-        overall_seed = 41
-        torch.manual_seed(overall_seed)
-        random.seed(overall_seed)
-        np.random.seed(overall_seed)
         
         # Suppress Lightning logs
         import logging

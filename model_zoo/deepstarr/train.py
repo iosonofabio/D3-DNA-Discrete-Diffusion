@@ -10,6 +10,9 @@ model creation and data loading.
 import os
 import sys
 from pathlib import Path
+import numpy as np
+import random
+import torch
 
 # Package imports
 
@@ -18,7 +21,7 @@ from model_zoo.deepstarr.models import create_model
 from model_zoo.deepstarr.data import get_deepstarr_datasets, get_deepstarr_dataloaders
 from model_zoo.deepstarr.sp_mse_callback import create_deepstarr_sp_mse_callback
 from omegaconf import OmegaConf
-
+from utils.utils import update_cfg_with_unknown_args
 
 class DeepSTARRLightningModule(BaseD3LightningModule):
     """Lightning module specifically for DeepSTARR dataset."""
@@ -57,7 +60,8 @@ class DeepSTARRDataModule(BaseD3DataModule):
 class DeepSTARRTrainer(BaseTrainer):
     """Trainer specifically for DeepSTARR dataset."""
     
-    def __init__(self, architecture: str, config_path: str = None, work_dir: str = None):
+    def __init__(self, architecture: str, config_path: str = None, work_dir: str = None,
+                 more_cfg_args: list = None):
         # Load DeepSTARR config
         if config_path:
             cfg = OmegaConf.load(config_path)
@@ -95,20 +99,32 @@ def main():
     """Main training function."""
     parser = parse_base_args()
     parser.description = 'DeepSTARR Training Script'
-    args = parser.parse_args()
-    
-    # Create trainer
+    args, unknown = parser.parse_known_args()
+
+    # Set all seeds for reproducibility
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
+    # Create trainer (loads cfg)
     trainer = DeepSTARRTrainer(
         architecture=args.architecture,
         config_path=args.config,
-        work_dir=args.work_dir
+        work_dir=args.work_dir,
+        more_cfg_args=unknown,
     )
-    
+
     # Override WandB settings if provided
     if args.wandb_project:
         trainer.cfg.wandb.project = args.wandb_project
     if args.wandb_name:
         trainer.cfg.wandb.name = args.wandb_name
+
+    # override other unknown args (e.g. --paths.data_dir)
+    if unknown:
+        update_cfg_with_unknown_args(trainer.cfg, unknown)
     
     # Train
     try:

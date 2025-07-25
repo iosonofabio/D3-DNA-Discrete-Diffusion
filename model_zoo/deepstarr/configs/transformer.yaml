@@ -1,7 +1,6 @@
 # DeepSTARR Dataset - Transformer Architecture Configuration
 dataset:
   name: deepstarr
-  data_file: DeepSTARR_data.h5
   sequence_length: 249
   num_classes: 4
   signal_dim: 2
@@ -65,7 +64,7 @@ sp_mse_validation:
 
 # Optimization configuration
 optim:
-  weight_decay: 1e-3   # note that it's int he 1e-1 order for pretraining; 1e-2 for fine tuning
+  weight_decay: 0   # note that it's in the 1e-1 order for pretraining; 1e-2 for fine tuning
   optimizer: AdamW
   lr: 0.0003     # TRY THIS
   beta1: 0.9     # TRY THIS: from diffusion
@@ -91,14 +90,14 @@ model:
 # Logging configuration (optional)
 wandb:
   enabled: true
-  project: d3-dna-diffusion
-  name: deepstarr-transformer-no-sc
+  project: d3-transfer-learn
+  name: deepstarr-tran-fine-tune
   entity: d3-cshl
   tags: []
   notes: ""
 
-# Paths (relative to dataset directory)
+# Paths - provide full paths
 paths:
-  data_dir: "model_zoo/deepstarr"
-  oracle_model: "oracle_models/oracle_DeepSTARR_DeepSTARR_data.ckpt"
+  data_file: "/grid/koo/home/duran/D3-DNA-Discrete-Diffusion/model_zoo/deepstarr/data_files/DeepSTARR_data_0.h5"
+  oracle_model: "model_zoo/deepstarr/oracle_models/oracle_DeepSTARR_DeepSTARR_data.ckpt"
   checkpoints_dir: "checkpoints"

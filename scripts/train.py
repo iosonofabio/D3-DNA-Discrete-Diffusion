@@ -511,5 +511,6 @@ def parse_base_args():
     parser.add_argument('--resume_from', help='Checkpoint to resume from')
     parser.add_argument('--wandb_project', help='Weights & Biases project name')
     parser.add_argument('--wandb_name', help='Weights & Biases run name')
-    
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+
     return parser

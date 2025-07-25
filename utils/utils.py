@@ -123,3 +123,39 @@ def save_checkpoint(ckpt_dir, state):
         'step': state['step']
     }
     torch.save(saved_state, ckpt_dir) 
+
+
+def update_cfg_with_unknown_args(cfg, unknown_args):
+    """Update cfg after loading with OmegaConf to override values in the config file.
+    
+    Args:
+        cfg: The config object to update.
+        unknown_args: A list of unknown arguments.
+    """
+    i = 0
+    while i < len(unknown_args):
+        arg = unknown_args[i]
+        if arg.startswith('--'):
+            key = arg[2:]
+            if (i + 1) < len(unknown_args):
+                value = unknown_args[i + 1]
+                # Try to interpret value as int, float, or bool
+                if value.lower() == 'true':
+                    value = True
+                elif value.lower() == 'false':
+                    value = False
+                else:
+                    try:
+                        value = int(value)
+                    except ValueError:
+                        try:
+                            value = float(value)
+                        except ValueError:
+                            pass  # keep as string
+                OmegaConf.update(cfg, key, value, merge=True)
+                print(f"Updated cfg with {key}={value}")
+                i += 2
+            else:
+                i += 1
+        else:
+            i += 1

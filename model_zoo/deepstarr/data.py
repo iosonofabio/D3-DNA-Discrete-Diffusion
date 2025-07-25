@@ -69,7 +69,8 @@ class DeepSTARRDataset(Dataset):
         return self.X[idx], self.y[idx]
 
 
-def get_deepstarr_datasets(data_dir: Optional[str] = None) -> Tuple[Dataset, Dataset]:
+# def get_deepstarr_datasets(data_dir: Optional[str] = None) -> Tuple[Dataset, Dataset]:
+def get_deepstarr_datasets(h5_file_path: str) -> Tuple[Dataset, Dataset]:
     """
     Get DeepSTARR train and validation datasets.
     
@@ -79,11 +80,8 @@ def get_deepstarr_datasets(data_dir: Optional[str] = None) -> Tuple[Dataset, Dat
     Returns:
         Tuple of (train_dataset, valid_dataset)
     """
-    if data_dir is None:
-        data_dir = os.path.join('model_zoo', 'deepstarr')
     
-    h5_file_path = os.path.join(data_dir, 'DeepSTARR_data.h5')
-    
+    # pass in data file path directly from config.paths.data_file
     train_set = DeepSTARRDataset(h5_file_path, split='train')
     valid_set = DeepSTARRDataset(h5_file_path, split='valid')
     
@@ -114,7 +112,7 @@ def get_deepstarr_dataloaders(config, distributed: bool = True) -> Tuple[DataLoa
         )
     
     # Get datasets
-    train_set, valid_set = get_deepstarr_datasets()
+    train_set, valid_set = get_deepstarr_datasets(config.paths.data_file)
     
     print(f"DeepSTARR dataset sizes - Train: {len(train_set)}, Valid: {len(valid_set)}")
     
