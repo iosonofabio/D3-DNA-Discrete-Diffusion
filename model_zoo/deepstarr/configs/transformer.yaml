@@ -15,8 +15,8 @@ training:
   batch_size: 256
   accum: 1
   max_epochs: 300
-  checkpoint_every_n_epochs: 10
-  log_freq: 50
+  checkpoint_every_n_epochs: 4
+  log_freq: 500
   val_every_n_epochs: 4
   weight: standard
   snapshot_sampling: true
@@ -64,11 +64,11 @@ sp_mse_validation:
 
 # Optimization configuration
 optim:
-  weight_decay: 0   # note that it's in the 1e-1 order for pretraining; 1e-2 for fine tuning
+  weight_decay: 0
   optimizer: AdamW
-  lr: 0.0003     # TRY THIS
-  beta1: 0.9     # TRY THIS: from diffusion
-  beta2: 0.999   # TRY THIS: from diffusion
+  lr: 0.0003
+  beta1: 0.9
+  beta2: 0.999 
   eps: 1.0e-08
   warmup: 2500
   grad_clip: 1.0
@@ -81,7 +81,7 @@ model:
   hidden_size: 768
   cond_dim: 128
   length: 249
-  n_blocks: 12   # TRY THIS: ith Tran, 4 is min 
+  n_blocks: 12
   n_heads: 12
   scale_by_sigma: false
   dropout: 0.1
@@ -90,8 +90,8 @@ model:
 # Logging configuration (optional)
 wandb:
   enabled: true
-  project: d3-transfer-learn
-  name: deepstarr-tran-fine-tune
+  project: d3-dna-diffusion
+  name: deepstarr-tran
   entity: d3-cshl
   tags: []
   notes: ""
