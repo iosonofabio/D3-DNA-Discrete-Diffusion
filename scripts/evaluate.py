@@ -79,7 +79,8 @@ class BaseEvaluator:
         return None
     
     def sample_sequences_for_evaluation(self, checkpoint_path: str, config: OmegaConf, 
-                                       dataloader, num_steps: int, architecture: str = 'transformer') -> Tuple[torch.Tensor, torch.Tensor]:
+                                       dataloader, num_steps: int, architecture: str = 'transformer', 
+                                       show_progress: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample sequences for evaluation using PC sampler.
         
@@ -89,6 +90,7 @@ class BaseEvaluator:
             dataloader: DataLoader for getting target labels
             num_steps: Number of sampling steps
             architecture: Architecture type
+            show_progress: Whether to show progress bar during sampling
             
         Returns:
             Tuple of (sampled_sequences, target_labels)
@@ -104,6 +106,10 @@ class BaseEvaluator:
         
         sampled_sequences = []
         all_targets = []
+        
+        # Wrap dataloader with tqdm if show_progress is True
+        if show_progress:
+            dataloader = tqdm(dataloader, desc="Sampling sequences")
         
         for batch, targets in dataloader:
             batch_size = batch.shape[0]
@@ -216,7 +222,8 @@ class BaseEvaluator:
     def evaluate_with_sampling(self, checkpoint_path: str, config: OmegaConf, 
                               oracle_checkpoint: str, data_path: str,
                               split: str = 'test', steps: Optional[int] = None, 
-                              batch_size: Optional[int] = None, architecture: str = 'transformer') -> Dict[str, Any]:
+                              batch_size: Optional[int] = None, architecture: str = 'transformer',
+                              show_progress: bool = False) -> Dict[str, Any]:
         """
         Evaluate model by sampling sequences and computing SP-MSE with oracle.
         
@@ -229,6 +236,7 @@ class BaseEvaluator:
             steps: Number of sampling steps (defaults to sequence length)
             batch_size: Batch size for evaluation (optional)
             architecture: Architecture type
+            show_progress: Whether to show progress bar during sampling
             
         Returns:
             Dictionary of evaluation results including SP-MSE
@@ -246,7 +254,7 @@ class BaseEvaluator:
         # Sample sequences using PC sampler
         print(f"Sampling sequences with PC sampler ({steps} steps)...")
         sampled_sequences, target_labels = self.sample_sequences_for_evaluation(
-            checkpoint_path, config, dataloader, steps, architecture
+            checkpoint_path, config, dataloader, steps, architecture, show_progress
         )
         
         # Load oracle model
@@ -353,6 +361,7 @@ def parse_base_args():
     parser.add_argument('--steps', type=int, help='Number of sampling steps (defaults to sequence length)')
     parser.add_argument('--output', help='Output file for results')
     parser.add_argument('--batch_size', type=int, help='Batch size for evaluation')
+    parser.add_argument('--show_progress', action='store_true', help='Show progress bar during sampling')
     
     return parser
 
@@ -386,6 +395,9 @@ def main_evaluate(evaluator: BaseEvaluator, args):
     
     config = OmegaConf.load(args.config)
     
+    # Handle progress bar settings
+    show_progress = args.show_progress
+    
     # Run evaluation with sampling (the main evaluation method now)
     metrics = evaluator.evaluate_with_sampling(
         checkpoint_path=args.checkpoint,
@@ -395,7 +407,8 @@ def main_evaluate(evaluator: BaseEvaluator, args):
         split=args.split,
         steps=getattr(args, 'steps', None),
         batch_size=args.batch_size,
-        architecture=args.architecture
+        architecture=args.architecture,
+        show_progress=show_progress
     )
     
     # Print results

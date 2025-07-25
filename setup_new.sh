@@ -17,8 +17,8 @@ else
 fi
 
 #Try to install packages to ensure that everything is up to date
-pip install torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 --index-url https://download.pytorch.org/whl/cu118
-pip install wandb dm-tree pytorch-lightning==2.1 transformers hydra-core omegaconf hydra-submitit-launcher scikit-learn
+pip install torch==2.5.0 torchvision==0.20.0 torchaudio==2.5.0 --index-url https://download.pytorch.org/whl/cu118
+pip install wandb dm-tree pytorch-lightning==2.3 transformers hydra-core omegaconf hydra-submitit-launcher scikit-learn
 mamba install ipykernel ipywidgets biotite matplotlib seaborn h5py --yes # lightning
-python -m pip install flash-attn==2.2.2 --no-build-isolation
+python -m pip install flash-attn==2.6.3 --no-build-isolation
 pip install -U tensorboard tensorboardX
