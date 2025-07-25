@@ -123,40 +123,40 @@ class LabelEmbedder(nn.Module):
         return embeddings
 
 
-class EmbeddingLayer(nn.Module):
-    """
-    Generic embedding layer that combines vocabulary and signal embeddings.
+# class EmbeddingLayer(nn.Module):
+#     """
+#     Generic embedding layer that combines vocabulary and signal embeddings.
     
-    This is dataset-agnostic - signal_dim is passed as a parameter.
-    """
+#     This is dataset-agnostic - signal_dim is passed as a parameter.
+#     """
     
-    def __init__(self, dim: int, vocab_dim: int, signal_dim: int):
-        super().__init__()
-        self.embedding = nn.Parameter(torch.empty((vocab_dim, dim)))
-        self.signal_embedding = nn.Linear(signal_dim, dim)
-        torch.nn.init.kaiming_uniform_(self.embedding, a=math.sqrt(5))
+#     def __init__(self, dim: int, vocab_dim: int, signal_dim: int):
+#         super().__init__()
+#         self.embedding = nn.Parameter(torch.empty((vocab_dim, dim)))
+#         self.signal_embedding = nn.Linear(signal_dim, dim)
+#         torch.nn.init.kaiming_uniform_(self.embedding, a=math.sqrt(5))
 
-    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Sequence tokens (batch_size, seq_length)
-            y: Signal embeddings (batch_size, signal_dim) or (batch_size, seq_length, signal_dim)
+#     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+#         """
+#         Args:
+#             x: Sequence tokens (batch_size, seq_length)
+#             y: Signal embeddings (batch_size, signal_dim) or (batch_size, seq_length, signal_dim)
             
-        Returns:
-            Combined embeddings (batch_size, seq_length, dim)
-        """
-        vocab_embed = self.embedding[x]
-        signal_embed = self.signal_embedding(y.to(torch.float32))
+#         Returns:
+#             Combined embeddings (batch_size, seq_length, dim)
+#         """
+#         vocab_embed = self.embedding[x]
+#         signal_embed = self.signal_embedding(y.to(torch.float32))
         
-        # Handle broadcasting for different signal dimensions
-        if signal_embed.dim() == 2 and vocab_embed.dim() == 3:
-            signal_embed = signal_embed[:, None, :]  # Broadcast to sequence length
-        elif signal_embed.dim() == 3 and vocab_embed.dim() == 3:
-            pass  # Already correct dimensions
-        else:
-            raise ValueError(f"Incompatible dimensions: vocab_embed {vocab_embed.shape}, signal_embed {signal_embed.shape}")
+#         # Handle broadcasting for different signal dimensions
+#         if signal_embed.dim() == 2 and vocab_embed.dim() == 3:
+#             signal_embed = signal_embed[:, None, :]  # Broadcast to sequence length
+#         elif signal_embed.dim() == 3 and vocab_embed.dim() == 3:
+#             pass  # Already correct dimensions
+#         else:
+#             raise ValueError(f"Incompatible dimensions: vocab_embed {vocab_embed.shape}, signal_embed {signal_embed.shape}")
         
-        return torch.add(vocab_embed, signal_embed)
+#         return torch.add(vocab_embed, signal_embed)
 
 
 class GaussianFourierProjection(nn.Module):

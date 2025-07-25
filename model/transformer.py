@@ -10,13 +10,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Tuple
 from omegaconf import OmegaConf, DictConfig
+import math
 
 from einops import rearrange
 from flash_attn.flash_attn_interface import flash_attn_varlen_qkvpacked_func
 
 from . import rotary
 from .layers import (
-    LayerNorm, TimestepEmbedder, LabelEmbedder, EmbeddingLayer,
+    LayerNorm, TimestepEmbedder, LabelEmbedder, #EmbeddingLayer,
     modulate_fused, get_bias_dropout_scale
 )
 
@@ -157,7 +158,7 @@ class TransformerModel(nn.Module):
     Pure Transformer SEDD Model.
     
     This implementation is completely dataset-agnostic. All dataset-specific
-    parameters (signal_dim, num_classes, sequence_length) are passed via config.
+    parameters (num_classes, sequence_length) are passed via config.
     """
     
     def __init__(self, config: DictConfig):
@@ -173,7 +174,6 @@ class TransformerModel(nn.Module):
         vocab_size = config.tokens + (1 if self.absorb else 0)
         
         # These should be provided by dataset-specific config
-        signal_dim = config.dataset.signal_dim
         num_classes = config.dataset.num_classes
         class_dropout_prob = getattr(config.model, 'class_dropout_prob', 0.1)
         
@@ -181,7 +181,6 @@ class TransformerModel(nn.Module):
         self.vocab_embed = EmbeddingLayer(
             dim=config.model.hidden_size, 
             vocab_dim=vocab_size,
-            signal_dim=signal_dim
         )
         self.sigma_map = TimestepEmbedder(config.model.cond_dim)
         self.label_embed = LabelEmbedder(num_classes, config.model.cond_dim, class_dropout_prob)
