@@ -18,7 +18,7 @@ import torch
 
 from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args
 from model_zoo.deepstarr.models import create_model
-from model_zoo.deepstarr.data import get_deepstarr_datasets, get_deepstarr_dataloaders
+from model_zoo.deepstarr.data import get_deepstarr_datasets
 from model_zoo.deepstarr.sp_mse_callback import create_deepstarr_sp_mse_callback
 from omegaconf import OmegaConf
 from utils.utils import update_cfg_with_unknown_args
@@ -53,7 +53,7 @@ class DeepSTARRDataModule(BaseD3DataModule):
     def setup(self, stage: str = None):
         """Setup DeepSTARR datasets."""
         # Use DeepSTARR-specific data loading
-        self.train_ds, self.val_ds = get_deepstarr_datasets()
+        self.train_ds, self.val_ds = get_deepstarr_datasets(self.cfg.paths.data_file)
         print(f"DeepSTARR dataset loaded: {len(self.train_ds)} train, {len(self.val_ds)} val samples")
 
 
@@ -122,7 +122,7 @@ def main():
     if args.wandb_name:
         trainer.cfg.wandb.name = args.wandb_name
 
-    # override other unknown args (e.g. --paths.data_dir)
+    # override other unknown args (e.g. --paths.data_file)
     if unknown:
         update_cfg_with_unknown_args(trainer.cfg, unknown)
     
