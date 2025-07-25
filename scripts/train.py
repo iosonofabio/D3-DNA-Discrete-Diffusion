@@ -32,7 +32,6 @@ from utils import losses
 from utils import graph_lib
 from utils import noise_lib
 from utils.utils import get_score_fn, load_hydra_config_from_run, makedirs, get_logger
-from utils.checkpoint_utils import is_original_checkpoint
 
 
 class BaseD3LightningModule(pl.LightningModule):
