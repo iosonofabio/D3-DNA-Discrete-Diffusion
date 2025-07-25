@@ -1,11 +1,11 @@
 """
 Utilities for handling checkpoint compatibility between original D3 format and PyTorch Lightning format.
+Now provides dataset-agnostic checkpoint loading functions.
 """
 
 import os
 import torch
 from typing import Dict, Any, Optional
-from pathlib import Path
 
 
 def is_original_checkpoint(checkpoint_path: str) -> bool:
@@ -112,73 +112,37 @@ def load_weights_from_original_checkpoint(model, ema, checkpoint_path: str, devi
     return step
 
 
-def get_model_class_for_checkpoint(root_dir: str, dataset_name: str = None):
-    """Determine the correct model class based on config and dataset."""
-    try:
-        from utils.utils import load_hydra_config_from_run
-        cfg = load_hydra_config_from_run(root_dir)
-        
-        # Try to get dataset from config
-        if dataset_name is None and hasattr(cfg, 'data') and hasattr(cfg.data, 'train'):
-            dataset_name = cfg.data.train
-        
-        # Use dataset factory to get model creation function
-        from utils.dataset_factory import get_factory
-        factory = get_factory()
-        
-        # Return a factory function that creates the model
-        def create_model_fn(cfg):
-            architecture = getattr(cfg.model, 'architecture', 'transformer')
-            return factory.create_model(dataset_name, cfg, architecture)
-        
-        return create_model_fn
-            
-    except Exception as e:
-        print(f"Warning: Could not determine dataset-specific model, using default: {e}")
-        # Return default factory function
-        from utils.dataset_factory import get_factory
-        factory = get_factory()
-        
-        def create_model_fn(cfg):
-            architecture = getattr(cfg.model, 'architecture', 'transformer')
-            return factory.create_model('deepstarr', cfg, architecture)  # Default to deepstarr
-        
-        return create_model_fn
+def create_model_from_config(cfg, device: str = 'cpu'):
+    """Create model from configuration using base models only."""
+    architecture = getattr(cfg.model, 'architecture', 'transformer').lower()
+    
+    if architecture == 'transformer':
+        from model.transformer import TransformerModel
+        model = TransformerModel(cfg)
+    elif architecture == 'convolutional':
+        from model.cnn import ConvolutionalModel
+        model = ConvolutionalModel(cfg)
+    else:
+        raise ValueError(f"Unsupported architecture: {architecture}. Supported: 'transformer', 'convolutional'")
+    
+    return model.to(device)
 
 
-def update_load_model_local(root_dir: str, device: str):
-    """Enhanced version of load_model_local that handles both checkpoint formats."""
-    from utils.utils import load_hydra_config_from_run
+def load_model_from_checkpoint_path(config, checkpoint_path: str, device: str = 'cpu'):
+    """Load model from explicit checkpoint path with config."""
     from model.ema import ExponentialMovingAverage
     from utils import graph_lib, noise_lib
     
-    # Load config
-    cfg = load_hydra_config_from_run(root_dir)
-    
     # Initialize components
-    graph = graph_lib.get_graph(cfg, device)
-    noise = noise_lib.get_noise(cfg).to(device)
+    graph = graph_lib.get_graph(config, device)
+    noise = noise_lib.get_noise(config).to(device)
     
-    # Get appropriate model class
-    SEDD_class = get_model_class_for_checkpoint(root_dir)
-    score_model = SEDD_class(cfg).to(device)
-    ema = ExponentialMovingAverage(score_model.parameters(), decay=cfg.training.ema)
+    # Create model
+    score_model = create_model_from_config(config, device)
+    ema = ExponentialMovingAverage(score_model.parameters(), decay=config.training.ema)
     
-    # Try to find checkpoint
-    checkpoint_paths = [
-        os.path.join(root_dir, "checkpoint.pth"),
-        os.path.join(root_dir, "lightning_checkpoint.ckpt"),
-        os.path.join(root_dir, "last.ckpt"),
-    ]
-    
-    checkpoint_path = None
-    for path in checkpoint_paths:
-        if os.path.exists(path):
-            checkpoint_path = path
-            break
-    
-    if checkpoint_path is None:
-        raise FileNotFoundError(f"No checkpoint found in {root_dir}")
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
     
     print(f"Loading checkpoint: {checkpoint_path}")
     

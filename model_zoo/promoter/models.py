@@ -5,8 +5,10 @@ This module provides Promoter-specific wrappers around the core architectures.
 These handle the dataset-specific signal preprocessing and model instantiation.
 """
 
+import os
 import torch
 from omegaconf import DictConfig
+from typing import Tuple, Any
 from model.transformer import TransformerModel, create_transformer_model
 from model.cnn import ConvolutionalModel, create_convolutional_model
 
@@ -93,6 +95,100 @@ def create_model(config: DictConfig, architecture: str):
         return PromoterConvolutionalModel(config)
     else:
         raise ValueError(f"Unknown architecture: {architecture}")
+
+
+def load_trained_model(checkpoint_path: str, config: DictConfig, architecture: str, device: str = 'cuda') -> Tuple[torch.nn.Module, Any, Any]:
+    """
+    Load trained Promoter model from specific checkpoint file.
+    
+    Args:
+        checkpoint_path: Path to checkpoint file
+        config: Configuration object
+        architecture: 'transformer' or 'convolutional'
+        device: Device to load model on
+        
+    Returns:
+        Tuple of (model, graph, noise) ready for sampling/evaluation
+    """
+    # Import required components
+    from model.ema import ExponentialMovingAverage
+    from utils import graph_lib, noise_lib
+    
+    print(f"Loading Promoter {architecture} model from {checkpoint_path}")
+    
+    # Validate checkpoint exists
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    
+    # Create model
+    if architecture.lower() == 'transformer':
+        model = PromoterTransformerModel(config)
+    elif architecture.lower() == 'convolutional':
+        model = PromoterConvolutionalModel(config)
+    else:
+        raise ValueError(f"Unsupported architecture: {architecture}")
+    
+    model.to(device)
+    
+    # Initialize graph and noise
+    graph = graph_lib.get_graph(config, device)
+    noise = noise_lib.get_noise(config).to(device)
+    
+    # Initialize EMA
+    ema = ExponentialMovingAverage(model.parameters(), decay=config.training.ema)
+    
+    print(f"Loading checkpoint: {checkpoint_path}")
+    
+    # Load checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    # Handle different checkpoint formats
+    if checkpoint_path.endswith('.ckpt'):
+        # Lightning checkpoint
+        if 'state_dict' in checkpoint:
+            model_state = {}
+            ema_state = {}
+            
+            for key, value in checkpoint['state_dict'].items():
+                if key.startswith('score_model.'):
+                    model_key = key.replace('score_model.', '')
+                    model_state[model_key] = value
+                elif key.startswith('model.'):
+                    model_key = key.replace('model.', '')
+                    model_state[model_key] = value
+                elif key.startswith('ema.'):
+                    ema_key = key.replace('ema.', '')
+                    ema_state[ema_key] = value
+            
+            # Load model weights
+            if model_state:
+                model.load_state_dict(model_state, strict=False)
+                print("✓ Loaded model weights from Lightning checkpoint")
+            
+            # Load EMA weights
+            if ema_state:
+                ema.load_state_dict(ema_state)
+                print("✓ Loaded EMA weights from Lightning checkpoint")
+        else:
+            model.load_state_dict(checkpoint, strict=False)
+            print("✓ Loaded model weights from Lightning checkpoint")
+    else:
+        # Original D3 format
+        if 'model' in checkpoint:
+            model.load_state_dict(checkpoint['model'], strict=False)
+            print("✓ Loaded model weights from original checkpoint")
+        
+        if 'ema' in checkpoint:
+            ema.load_state_dict(checkpoint['ema'])
+            print("✓ Loaded EMA weights from original checkpoint")
+    
+    # Apply EMA weights to model
+    ema.store(model.parameters())
+    ema.copy_to(model.parameters())
+    
+    print(f"✓ Promoter {architecture} model loaded successfully")
+    
+    return model, graph, noise
 
 
 # Legacy compatibility

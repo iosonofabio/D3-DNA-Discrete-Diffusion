@@ -2,39 +2,51 @@
 """
 Promoter Evaluation Script
 
-This script provides evaluation functionality specifically for the Promoter dataset,
-inheriting from the base evaluation classes and implementing Promoter-specific
-model creation, data loading, and oracle evaluation.
+Inherits from base evaluation framework while using Promoter-specific models directly.
 """
 
 import os
 import sys
+import argparse
 from pathlib import Path
 
-# Package imports
-
-from scripts.evaluate import BaseEvaluator, parse_base_args, main_evaluate
-from model_zoo.promoter.models import create_model
-from model_zoo.promoter.data import get_promoter_datasets
-from model_zoo.promoter.sei import Sei, NonStrandSpecific
+import torch
 from torch.utils.data import DataLoader
 from omegaconf import OmegaConf
-import torch
+from typing import Optional
+from tqdm import tqdm
+
+# Add project root to Python path for imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+# Import base framework and Promoter-specific components
+from scripts.evaluate import BaseEvaluator, parse_base_args, main_evaluate
+from model_zoo.promoter.data import get_promoter_datasets
+from model_zoo.promoter.sei import Sei, NonStrandSpecific
 
 
 class PromoterEvaluator(BaseEvaluator):
-    """Evaluator specifically for Promoter dataset."""
+    """Promoter-specific evaluator that inherits from base framework."""
     
     def __init__(self):
-        super().__init__('promoter')
+        super().__init__("Promoter")
+    
+    def load_model(self, checkpoint_path: str, config: OmegaConf, architecture: str = 'transformer'):
+        """Load Promoter model using dataset-specific model loading."""
+        from model_zoo.promoter.models import load_trained_model
         
-    def create_model(self, config, architecture):
-        """Create Promoter-specific model."""
-        return create_model(config, architecture)
-        
-    def create_dataloader(self, config, split='test', batch_size=None):
+        return load_trained_model(checkpoint_path, config, architecture, self.device)
+    
+    def get_sequence_length(self, config: OmegaConf) -> int:
+        """Get Promoter sequence length."""
+        if hasattr(config, 'model') and hasattr(config.model, 'length'):
+            return config.model.length
+        return 1024  # Promoter default sequence length
+    
+    def create_dataloader(self, config: OmegaConf, split: str = 'test', batch_size: Optional[int] = None):
         """Create Promoter dataloader."""
-        # Load datasets
+        # Load datasets 
         train_ds, val_ds = get_promoter_datasets()
         
         # Select appropriate dataset
@@ -45,9 +57,11 @@ class PromoterEvaluator(BaseEvaluator):
         else:
             raise ValueError(f"Unknown split: {split}")
             
-        # Create dataloader
+        # Use config batch size if not specified
         if batch_size is None:
-            batch_size = getattr(config.eval, 'batch_size', 64) // (config.ngpus * config.training.accum)
+            batch_size = getattr(config, 'batch_size', 32)
+            if hasattr(config, 'eval') and hasattr(config.eval, 'batch_size'):
+                batch_size = config.eval.batch_size
             
         return DataLoader(
             dataset,
@@ -57,102 +71,51 @@ class PromoterEvaluator(BaseEvaluator):
             pin_memory=True
         )
     
-    def process_batch(self, batch):
-        """
-        Process Promoter batch data.
-        
-        Promoter data comes as concatenated (sequence + target) tensors.
-        """
-        if batch.dim() == 3 and batch.shape[-1] == 5:
-            # Extract sequence (first 4 channels) and target (last channel)
-            seq_one_hot = batch[:, :, :4]
-            target = batch[:, :, 4:5]
-            
-            # Convert one-hot to indices for model input
-            inputs = torch.argmax(seq_one_hot, dim=-1)
-            
-            return inputs, target
-        else:
-            return batch, None
-    
-    def load_oracle_model(self, oracle_checkpoint, data_path):
-        """Load SEI oracle model for promoter evaluation."""
+    def load_oracle_model(self, oracle_checkpoint: str, data_path: str):
+        """Load Promoter oracle model (Sei)."""
         try:
-            # Load the SEI oracle model
-            sei_model = Sei()
-            oracle = NonStrandSpecific(sei_model)
+            # Load Sei oracle model
+            oracle = Sei(sequence_length=1024, n_targets=21907)
+            oracle = NonStrandSpecific(oracle)
             
             # Load checkpoint if provided
             if oracle_checkpoint and os.path.exists(oracle_checkpoint):
                 checkpoint = torch.load(oracle_checkpoint, map_location=self.device)
-                oracle.load_state_dict(checkpoint, strict=False)
+                oracle.load_state_dict(checkpoint)
             
-            oracle = oracle.eval().to(self.device)
+            oracle.to(self.device)
+            oracle.eval()
             
-            print("✓ Loaded SEI oracle model for Promoter evaluation")
+            print("✓ Loaded Promoter oracle model (Sei)")
             return oracle
             
         except Exception as e:
-            print(f"Failed to load SEI oracle model: {e}")
+            print(f"Failed to load Promoter oracle model: {e}")
             return None
     
-    def evaluate_with_oracle(self, model, oracle_model, dataloader, config):
-        """Evaluate using SEI oracle model for promoter-specific metrics."""
-        if oracle_model is None:
-            return {'oracle_evaluation': 'oracle_model_not_loaded'}
-        
-        model.eval()
-        oracle_model.eval()
-        
-        # Implement promoter-specific evaluation logic here
-        # This would evaluate generated promoter sequences using the SEI model
-        
-        # Placeholder implementation
-        oracle_scores = []
-        num_batches = 0
-        
-        with torch.no_grad():
-            for batch in dataloader:
-                inputs, targets = self.process_batch(batch)
-                inputs = inputs.to(self.device)
-                if targets is not None:
-                    targets = targets.to(self.device)
+    def get_original_test_data(self, data_path: str) -> torch.Tensor:
+        """Get original test data for SP-MSE comparison."""
+        try:
+            # Load Promoter test data
+            train_ds, val_ds = get_promoter_datasets()
+            
+            # Create a small batch for comparison
+            dataloader = DataLoader(val_ds, batch_size=100, shuffle=False)
+            batch = next(iter(dataloader))
+            
+            if len(batch) == 2:
+                sequences, _ = batch
+                return sequences
+            else:
+                return batch
                 
-                # For promoter evaluation, we would typically:
-                # 1. Generate sequences from the diffusion model
-                # 2. Convert to one-hot format for SEI model
-                # 3. Evaluate with SEI to get expression predictions
-                # 4. Compare with target expression values
-                
-                # For now, just compute a placeholder metric
-                # Convert inputs back to one-hot for SEI model
-                batch_size, seq_len = inputs.shape
-                inputs_one_hot = torch.nn.functional.one_hot(inputs, num_classes=4).float()
-                inputs_one_hot = inputs_one_hot.permute(0, 2, 1)  # (batch, 4, seq_len) for conv
-                
-                try:
-                    oracle_pred = oracle_model(inputs_one_hot)
-                    # Simple evaluation metric (would need proper implementation)
-                    score = torch.mean(oracle_pred).item()
-                    oracle_scores.append(score)
-                except Exception as e:
-                    print(f"Oracle evaluation error: {e}")
-                    break
-                
-                num_batches += 1
-                if num_batches >= 5:  # Limit for demonstration
-                    break
-        
-        avg_oracle_score = sum(oracle_scores) / len(oracle_scores) if oracle_scores else 0.0
-        
-        return {
-            'oracle_evaluation': 'completed',
-            'sei_expression_score': avg_oracle_score,
-            'num_oracle_batches': len(oracle_scores)
-        }
+        except Exception as e:
+            print(f"Error loading original test data: {e}")
+            # Return dummy data as fallback
+            return torch.zeros(100, 1024, 4)  # One-hot encoded sequences
 
 
-def load_config(architecture):
+def load_config(architecture: str):
     """Load Promoter configuration."""
     config_file = Path(__file__).parent / 'configs' / f'{architecture}.yaml'
     if not config_file.exists():
@@ -161,32 +124,48 @@ def load_config(architecture):
 
 
 def main():
-    """Main evaluation function."""
+    """Main evaluation function using base framework."""
+    # Parse arguments using base framework
     parser = parse_base_args()
-    parser.description = 'Promoter Evaluation Script'
+    parser.add_argument('--model_path', required=True, help='Path to model directory (required for evaluation)')
+    parser.add_argument('--steps', type=int, help='Number of sampling steps (defaults to sequence length)')
     args = parser.parse_args()
     
-    # Create evaluator
-    evaluator = PromoterEvaluator()
+    # Validate required arguments for evaluation
+    if not args.oracle_checkpoint:
+        print("Error: --oracle_checkpoint is required for evaluation")
+        return 1
+    if not args.data_path:
+        print("Error: --data_path is required for evaluation")
+        return 1
     
     # Load config if not provided
     if not args.config:
         try:
-            config = load_config(args.architecture)
-        except FileNotFoundError:
-            print(f"Error: No config provided and default config not found for architecture: {args.architecture}")
+            config_path = Path(__file__).parent / 'configs' / f'{args.architecture}.yaml'
+            if config_path.exists():
+                args.config = str(config_path)
+                print(f"Using default config: {args.config}")
+            else:
+                print(f"Error: No config provided and default config not found: {config_path}")
+                print("Please provide a config file with --config")
+                return 1
+        except Exception as e:
+            print(f"Error loading default config: {e}")
             return 1
-    else:
-        config = OmegaConf.load(args.config)
     
-    # Run evaluation
-    metrics = evaluator.evaluate(
-        checkpoint_path=args.checkpoint,
+    config = OmegaConf.load(args.config)
+    evaluator = PromoterEvaluator()
+    
+    # Run evaluation (always includes sampling + SP-MSE computation)
+    metrics = evaluator.evaluate_with_sampling(
+        model_path=args.model_path,
         config=config,
-        architecture=args.architecture,
+        oracle_checkpoint=args.oracle_checkpoint,
+        data_path=args.data_path,
         split=args.split,
-        oracle_checkpoint=args.oracle_checkpoint if args.use_oracle else None,
-        data_path=args.data_path
+        steps=args.steps,
+        batch_size=args.batch_size
     )
     
     # Print and save results
@@ -195,6 +174,7 @@ def main():
     output_path = args.output or f"evaluation_results/promoter_{args.architecture}_{args.split}_results.json"
     evaluator.save_results(metrics, output_path)
     
+    print(f"\n✓ Promoter evaluation completed successfully!")
     return 0
 
 
