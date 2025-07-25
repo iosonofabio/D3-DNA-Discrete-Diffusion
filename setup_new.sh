@@ -20,5 +20,5 @@ fi
 pip install torch==2.5.0 torchvision==0.20.0 torchaudio==2.5.0 --index-url https://download.pytorch.org/whl/cu118
 pip install wandb dm-tree pytorch-lightning==2.3 transformers hydra-core omegaconf hydra-submitit-launcher scikit-learn
 mamba install ipykernel ipywidgets biotite matplotlib seaborn h5py --yes # lightning
-python -m pip install flash-attn==2.6.3 --no-build-isolation
+python -m pip -v install flash-attn==2.6.3 --no-build-isolation
 pip install -U tensorboard tensorboardX

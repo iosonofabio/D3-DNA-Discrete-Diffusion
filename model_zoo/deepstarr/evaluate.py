@@ -15,6 +15,8 @@ from torch.utils.data import DataLoader
 from omegaconf import OmegaConf
 from typing import Optional
 from tqdm import tqdm
+import h5py
+import numpy as np
 
 # Add project root to Python path for imports
 project_root = Path(__file__).parent.parent.parent
@@ -41,13 +43,15 @@ class DeepSTARREvaluator(BaseEvaluator):
     def create_dataloader(self, config: OmegaConf, split: str = 'test', batch_size: Optional[int] = None):
         """Create DeepSTARR dataloader."""
         # Load datasets
-        train_ds, val_ds = get_deepstarr_datasets()
+        train_ds, val_ds, test_ds = get_deepstarr_datasets()
         
         # Select appropriate dataset
         if split == 'train':
             dataset = train_ds
-        elif split in ['val', 'test']:  # Use val as test for now
+        elif split == 'val':  # Use val as test for now
             dataset = val_ds
+        elif split == 'test':
+            dataset = test_ds
         else:
             raise ValueError(f"Unknown split: {split}")
             
@@ -66,8 +70,11 @@ class DeepSTARREvaluator(BaseEvaluator):
     def load_oracle_model(self, oracle_checkpoint: str, data_path: str):
         """Load DeepSTARR oracle model."""
         try:
-            if not data_path:
+            import os
+            # Check if data_path is empty, a directory, or doesn't exist
+            if not data_path or os.path.isdir(data_path) or not os.path.exists(data_path):
                 data_path = 'model_zoo/deepstarr/DeepSTARR_data.h5'
+                print(f"Using default data path: {data_path}")
                 
             oracle = PL_DeepSTARR.load_from_checkpoint(
                 oracle_checkpoint, 
@@ -85,23 +92,13 @@ class DeepSTARREvaluator(BaseEvaluator):
     def get_original_test_data(self, data_path: str) -> torch.Tensor:
         """Get original test data for SP-MSE comparison."""
         try:
-            # Load DeepSTARR test data
-            train_ds, val_ds = get_deepstarr_datasets()
-            
-            # Create a small batch for comparison
-            dataloader = DataLoader(val_ds, batch_size=100, shuffle=False)
-            batch = next(iter(dataloader))
-            
-            if len(batch) == 2:
-                sequences, _ = batch
-                return sequences
-            else:
-                return batch
-                
+            # Load DeepSTARR test data h5  
+            with h5py.File(data_path, 'r') as data_file:
+                X = torch.tensor(np.array(data_file['X_test']))
+            return X
         except Exception as e:
             print(f"Error loading original test data: {e}")
-            # Return dummy data as fallback
-            return torch.zeros(100, 249, 4)  # One-hot encoded sequences
+            return torch.zeros(100, 4, 249)
 
 
 def load_default_config():
@@ -145,7 +142,8 @@ def main():
         split=args.split,
         steps=args.steps,
         batch_size=args.batch_size,
-        architecture=args.architecture
+        architecture=args.architecture,
+        show_progress=args.show_progress
     )
     
     # Print and save results

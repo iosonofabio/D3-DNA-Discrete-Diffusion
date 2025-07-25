@@ -86,8 +86,9 @@ def get_deepstarr_datasets(data_dir: Optional[str] = None) -> Tuple[Dataset, Dat
     
     train_set = DeepSTARRDataset(h5_file_path, split='train')
     valid_set = DeepSTARRDataset(h5_file_path, split='valid')
+    test_set = DeepSTARRDataset(h5_file_path, split='test')
     
-    return train_set, valid_set
+    return train_set, valid_set, test_set
 
 
 def get_deepstarr_dataloaders(config, distributed: bool = True) -> Tuple[DataLoader, DataLoader]:
@@ -114,7 +115,7 @@ def get_deepstarr_dataloaders(config, distributed: bool = True) -> Tuple[DataLoa
         )
     
     # Get datasets
-    train_set, valid_set = get_deepstarr_datasets()
+    train_set, valid_set, _ = get_deepstarr_datasets()
     
     print(f"DeepSTARR dataset sizes - Train: {len(train_set)}, Valid: {len(valid_set)}")
     

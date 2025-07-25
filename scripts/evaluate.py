@@ -104,6 +104,14 @@ class BaseEvaluator:
         # Get sequence length
         sequence_length = self.get_sequence_length(config)
         
+        # Get batch size from dataloader
+        batch_size = dataloader.batch_size
+        
+        # Create PC sampler once (will be reused for all batches)
+        sampling_fn = sampling.get_pc_sampler(
+            graph, noise, (batch_size, sequence_length), 'analytic', num_steps, device=self.device
+        )
+        
         sampled_sequences = []
         all_targets = []
         
@@ -111,17 +119,19 @@ class BaseEvaluator:
         if show_progress:
             dataloader = tqdm(dataloader, desc="Sampling sequences")
         
-        for batch, targets in dataloader:
-            batch_size = batch.shape[0]
+        for batch_idx, (batch, targets) in enumerate(dataloader):
+            current_batch_size = batch.shape[0]
             
-            # Create PC sampler for this batch size
-            sampling_fn = sampling.get_pc_sampler(
-                graph, noise, (batch_size, sequence_length), 'analytic', num_steps, device=self.device
-            )
+            # If last batch has different size, create new sampling function
+            if current_batch_size != batch_size:
+                sampling_fn = sampling.get_pc_sampler(
+                    graph, noise, (current_batch_size, sequence_length), 'analytic', num_steps, device=self.device
+                )
             
             # Sample sequences conditioned on targets
             sample = sampling_fn(model, targets.to(self.device))
-            sampled_sequences.append(sample)
+            seq_pred_one_hot = F.one_hot(sample, num_classes=4).float()
+            sampled_sequences.append(seq_pred_one_hot)
             all_targets.append(targets)
         
         # Concatenate all samples
@@ -169,14 +179,10 @@ class BaseEvaluator:
         Returns:
             SP-MSE score
         """
-        import torch.nn.functional as F
-        
-        # Convert sampled sequences to one-hot
-        seq_pred_one_hot = F.one_hot(sampled_sequences, num_classes=4).float()
         
         # Get oracle predictions for original and generated data
         val_score = oracle_model.predict_custom(original_data.to(self.device))
-        val_pred_score = oracle_model.predict_custom(seq_pred_one_hot.permute(0, 2, 1).to(self.device))
+        val_pred_score = oracle_model.predict_custom(sampled_sequences.permute(0, 2, 1).to(self.device))
         
         # Compute SP-MSE
         sp_mse = (val_score - val_pred_score) ** 2
