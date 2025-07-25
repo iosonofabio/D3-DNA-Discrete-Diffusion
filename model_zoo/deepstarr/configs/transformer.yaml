@@ -98,6 +98,6 @@ wandb:
 
 # Paths - provide full paths
 paths:
-  data_file: "/grid/koo/home/duran/D3-DNA-Discrete-Diffusion/model_zoo/deepstarr/data_files/DeepSTARR_data_0.h5"
+  data_file: "model_zoo/deepstarr/DeepSTARR_data.h5"
   oracle_model: "model_zoo/deepstarr/oracle_models/oracle_DeepSTARR_DeepSTARR_data.ckpt"
   checkpoints_dir: "checkpoints"
