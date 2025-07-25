@@ -1,7 +1,6 @@
 # DeepSTARR Dataset - Transformer Architecture Configuration
 dataset:
   name: deepstarr
-  data_file: DeepSTARR_data.h5
   sequence_length: 249
   num_classes: 4
   signal_dim: 2
@@ -15,18 +14,10 @@ tokens: 4
 training:
   batch_size: 256
   accum: 1
-<<<<<<< HEAD:model_zoo/deepstarr/configs/transformer.yaml
   max_epochs: 300
   checkpoint_every_n_epochs: 10
   log_freq: 50
   val_every_n_epochs: 4
-=======
-  n_iters: 500000
-  snapshot_freq: 50000
-  log_freq: 5000 # 5000
-  eval_freq: 5000
-  snapshot_freq_for_preemption: 10000
->>>>>>> 5d950db (removing ema weight use in val loss calculation):model_zoo/deepstarr/config/Tran/hydra/config.yaml
   weight: standard
   snapshot_sampling: true
   ema: 0.9999
@@ -73,11 +64,11 @@ sp_mse_validation:
 
 # Optimization configuration
 optim:
-  weight_decay: 0
+  weight_decay: 0   # note that it's in the 1e-1 order for pretraining; 1e-2 for fine tuning
   optimizer: AdamW
-  lr: 0.0003
-  beta1: 0.9
-  beta2: 0.999
+  lr: 0.0003     # TRY THIS
+  beta1: 0.9     # TRY THIS: from diffusion
+  beta2: 0.999   # TRY THIS: from diffusion
   eps: 1.0e-08
   warmup: 2500
   grad_clip: 1.0
@@ -90,7 +81,7 @@ model:
   hidden_size: 768
   cond_dim: 128
   length: 249
-  n_blocks: 12
+  n_blocks: 12   # TRY THIS: ith Tran, 4 is min 
   n_heads: 12
   scale_by_sigma: false
   dropout: 0.1
@@ -99,19 +90,14 @@ model:
 # Logging configuration (optional)
 wandb:
   enabled: true
-  project: d3-dna-diffusion
-<<<<<<< HEAD:model_zoo/deepstarr/configs/transformer.yaml
-  name: deepstarr-transformer-no-sc
+  project: d3-transfer-learn
+  name: deepstarr-tran-fine-tune
   entity: d3-cshl
-=======
-  name: deepstarr-tran-sc
-  entity: alejandraduran-u-cshl
->>>>>>> 5d950db (removing ema weight use in val loss calculation):model_zoo/deepstarr/config/Tran/hydra/config.yaml
   tags: []
   notes: ""
 
-# Paths (relative to dataset directory)
+# Paths - provide full paths
 paths:
-  data_dir: "model_zoo/deepstarr"
-  oracle_model: "oracle_models/oracle_DeepSTARR_DeepSTARR_data.ckpt"
+  data_file: "/grid/koo/home/duran/D3-DNA-Discrete-Diffusion/model_zoo/deepstarr/data_files/DeepSTARR_data_0.h5"
+  oracle_model: "model_zoo/deepstarr/oracle_models/oracle_DeepSTARR_DeepSTARR_data.ckpt"
   checkpoints_dir: "checkpoints"
