@@ -57,8 +57,18 @@ class cCREDataModule(BaseD3DataModule):
         
     def setup(self, stage: str = None):
         """Setup cCRE datasets."""
+        # Get split configuration from config
+        train_ratio = getattr(self.cfg.data, 'train_ratio', 0.95)
+        valid_ratio = getattr(self.cfg.data, 'valid_ratio', 0.05)
+        split_seed = getattr(self.cfg.data, 'split_seed', 42)
+        
         # Use cCRE-specific data loading
-        self.train_ds, self.val_ds = get_ccre_datasets(self.cfg.paths.data_file)
+        self.train_ds, self.val_ds = get_ccre_datasets(
+            self.cfg.paths.data_file,
+            train_ratio=train_ratio,
+            valid_ratio=valid_ratio,
+            seed=split_seed
+        )
         print(f"cCRE dataset loaded: {len(self.train_ds)} train, {len(self.val_ds)} val samples")
 
 
