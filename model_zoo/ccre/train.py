@@ -42,7 +42,7 @@ class cCRELightningModule(BaseD3LightningModule):
         """
         if isinstance(batch, (list, tuple)) and len(batch) == 2:
             inputs, targets = batch
-            # For unlabeled data, return inputs and None (completely unconditional)
+            # For unlabeled data, return inputs and None (no labels)
             return inputs, None
         else:
             raise ValueError(f"Expected (inputs, targets) pair, got {type(batch)}")
