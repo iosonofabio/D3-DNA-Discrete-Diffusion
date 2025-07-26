@@ -59,7 +59,7 @@ class cCREDataset(Dataset):
         """Load and preprocess data from H5 file with train/valid splitting."""
         with h5py.File(self.h5_file_path, 'r') as data:
             # Load all sequences from the single 'seqs' key
-            X = torch.tensor(np.array(data['seqs']))
+            X = torch.tensor(np.array(data['seqs'])).permute(0, 2, 1)
             
             # Convert one-hot to indices for D3 processing
             # X shape: (n_samples, 4, seq_length) -> (n_samples, seq_length)
