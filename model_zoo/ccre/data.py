@@ -24,39 +24,65 @@ class cCREDataset(Dataset):
     without any labels (unsupervised learning).
     """
     
-    def __init__(self, h5_file_path: str, split: str = 'train'):
+    def __init__(self, h5_file_path: str, split: str = 'train', 
+                 train_ratio: float = 0.95, valid_ratio: float = 0.05,
+                 seed: int = 42):
         """
         Initialize the cCRE dataset.
         
         Args:
             h5_file_path: Path to the cCRE H5 data file
-            split: Dataset split ('train', 'valid', 'test')
+            split: Dataset split ('train', 'valid')
+            train_ratio: Ratio of data to use for training (default: 0.95)
+            valid_ratio: Ratio of data to use for validation (default: 0.05)
+            seed: Random seed for reproducible splits
         """
         self.h5_file_path = h5_file_path
         self.split = split.lower()
+        self.train_ratio = train_ratio
+        self.valid_ratio = valid_ratio
+        self.seed = seed
         
         if not os.path.exists(h5_file_path):
             raise FileNotFoundError(f"cCRE data file not found: {h5_file_path}")
+        
+        if abs(train_ratio + valid_ratio - 1.0) > 1e-6:
+            raise ValueError(f"train_ratio + valid_ratio must equal 1.0, got {train_ratio + valid_ratio}")
+        
+        if valid_ratio == 0.0:
+            print(f"Note: Using train_ratio=1.0, valid_ratio=0.0 (no validation split)")
         
         # Load and preprocess data
         self.X = self._load_data()
         
     def _load_data(self) -> torch.Tensor:
-        """Load and preprocess data from H5 file."""
+        """Load and preprocess data from H5 file with train/valid splitting."""
         with h5py.File(self.h5_file_path, 'r') as data:
-            # Determine which split to load
-            if self.split == 'train':
-                X = torch.tensor(np.array(data['X_train']))
-            elif self.split == 'valid':
-                X = torch.tensor(np.array(data['X_valid']))
-            elif self.split == 'test':
-                X = torch.tensor(np.array(data['X_test']))
-            else:
-                raise ValueError(f"Unknown split: {self.split}")
+            # Load all sequences from the single 'seqs' key
+            X = torch.tensor(np.array(data['seqs']))
             
             # Convert one-hot to indices for D3 processing
             # X shape: (n_samples, 4, seq_length) -> (n_samples, seq_length)
             X = torch.argmax(X, dim=1)
+            
+            # Create reproducible train/valid split
+            total_samples = X.shape[0]
+            np.random.seed(self.seed)
+            indices = np.random.permutation(total_samples)
+            
+            train_size = int(total_samples * self.train_ratio)
+            
+            if self.split == 'train':
+                selected_indices = indices[:train_size]
+            elif self.split == 'valid':
+                selected_indices = indices[train_size:]
+                if len(selected_indices) == 0:
+                    print(f"Warning: Validation split is empty (valid_ratio={self.valid_ratio}). "
+                          f"Consider setting valid_ratio > 0 for proper validation.")
+            else:
+                raise ValueError(f"Unknown split: {self.split}. Only 'train' and 'valid' are supported.")
+            
+            X = X[selected_indices]
             
         return X
     
@@ -70,20 +96,26 @@ class cCREDataset(Dataset):
         return self.X[idx], self.X[idx]
 
 
-def get_ccre_datasets(h5_file_path: str) -> Tuple[Dataset, Dataset]:
+def get_ccre_datasets(h5_file_path: str, train_ratio: float = 0.95, 
+                     valid_ratio: float = 0.05, seed: int = 42) -> Tuple[Dataset, Dataset]:
     """
     Get cCRE train and validation datasets.
     
     Args:
         h5_file_path: Path to the cCRE H5 data file
+        train_ratio: Ratio of data to use for training (default: 0.95)
+        valid_ratio: Ratio of data to use for validation (default: 0.05)  
+        seed: Random seed for reproducible splits
         
     Returns:
         Tuple of (train_dataset, valid_dataset)
     """
     
     # Pass in data file path directly from config.paths.data_file
-    train_set = cCREDataset(h5_file_path, split='train')
-    valid_set = cCREDataset(h5_file_path, split='valid')
+    train_set = cCREDataset(h5_file_path, split='train', 
+                           train_ratio=train_ratio, valid_ratio=valid_ratio, seed=seed)
+    valid_set = cCREDataset(h5_file_path, split='valid',
+                           train_ratio=train_ratio, valid_ratio=valid_ratio, seed=seed)
     
     return train_set, valid_set
 
@@ -111,8 +143,18 @@ def get_ccre_dataloaders(config, distributed: bool = True) -> Tuple[DataLoader, 
             f"{config.ngpus} gpus with accumulation {config.training.accum}."
         )
     
+    # Get split configuration from config
+    train_ratio = getattr(config.data, 'train_ratio', 0.95)
+    valid_ratio = getattr(config.data, 'valid_ratio', 0.05)
+    split_seed = getattr(config.data, 'split_seed', 42)
+    
     # Get datasets
-    train_set, valid_set = get_ccre_datasets(config.paths.data_file)
+    train_set, valid_set = get_ccre_datasets(
+        config.paths.data_file, 
+        train_ratio=train_ratio,
+        valid_ratio=valid_ratio,
+        seed=split_seed
+    )
     
     print(f"cCRE dataset sizes - Train: {len(train_set)}, Valid: {len(valid_set)}")
     

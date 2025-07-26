@@ -44,8 +44,18 @@ class cCREEvaluator(BaseEvaluator):
     
     def create_dataloader(self, config: OmegaConf, split: str = 'test', batch_size: Optional[int] = None):
         """Create cCRE dataloader."""
+        # Get split configuration from config
+        train_ratio = getattr(config.data, 'train_ratio', 0.95)
+        valid_ratio = getattr(config.data, 'valid_ratio', 0.05)
+        split_seed = getattr(config.data, 'split_seed', 42)
+        
         # Load datasets
-        train_ds, val_ds = get_ccre_datasets(config.paths.data_file)
+        train_ds, val_ds = get_ccre_datasets(
+            config.paths.data_file,
+            train_ratio=train_ratio,
+            valid_ratio=valid_ratio,
+            seed=split_seed
+        )
         
         # Select appropriate dataset
         if split == 'train':
@@ -70,9 +80,9 @@ class cCREEvaluator(BaseEvaluator):
     def get_original_test_data(self, data_path: str) -> torch.Tensor:
         """Get original test data for evaluation."""
         try:
-            # Load cCRE test data h5  
+            # Load cCRE data from the 'seqs' key
             with h5py.File(data_path, 'r') as data_file:
-                X = torch.tensor(np.array(data_file['X_test']))
+                X = torch.tensor(np.array(data_file['seqs']))
             return X
         except Exception as e:
             print(f"Error loading original test data: {e}")

@@ -26,6 +26,9 @@ data:
   train: ccre
   valid: ccre
   cache_dir: data
+  train_ratio: 0.95
+  valid_ratio: 0.05
+  split_seed: 42
 
 # Graph configuration
 graph:
