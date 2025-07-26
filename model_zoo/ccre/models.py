@@ -1,9 +1,8 @@
 """
 cCRE Dataset-Specific Models
 
-This module provides cCRE-specific wrappers around the core architectures.
-These handle the dataset-specific preprocessing and model instantiation for
-unlabeled 512bp sequences.
+This module provides cCRE-specific model factory functions that configure
+the base architectures for unlabeled 512bp sequences.
 """
 
 import os
@@ -14,76 +13,32 @@ from model.transformer import TransformerModel, create_transformer_model
 from model.cnn import ConvolutionalModel, create_convolutional_model
 
 
-class cCREVocabEmbedding(torch.nn.Module):
-    """Vocabulary embedding without signal conditioning for cCRE."""
+def create_ccre_transformer_model(config: DictConfig) -> TransformerModel:
+    """Create a transformer model configured for cCRE dataset."""
+    # Ensure dataset-specific config is set
+    if not hasattr(config, 'dataset'):
+        config.dataset = {}
+    config.dataset.name = 'ccre'
+    config.dataset.num_classes = 4
+    config.dataset.sequence_length = 512
+    config.dataset.signal_dim = 0  # No labels for unlabeled data
     
-    def __init__(self, vocab_dim: int, dim: int):
-        super().__init__()
-        self.embedding = torch.nn.Parameter(torch.empty((vocab_dim, dim)))
-        torch.nn.init.kaiming_uniform_(self.embedding, a=torch.sqrt(torch.tensor(5.0)))
-    
-    def forward(self, x, y):
-        # Only return vocabulary embedding, ignore y (labels)
-        return self.embedding[x]
+    # Use base transformer model - it now handles labels=None properly
+    return TransformerModel(config)
 
 
-class cCRETransformerModel(TransformerModel):
-    """cCRE-specific transformer model wrapper."""
+def create_ccre_convolutional_model(config: DictConfig) -> ConvolutionalModel:
+    """Create a convolutional model configured for cCRE dataset."""
+    # Ensure dataset-specific config is set
+    if not hasattr(config, 'dataset'):
+        config.dataset = {}
+    config.dataset.name = 'ccre'
+    config.dataset.num_classes = 4
+    config.dataset.sequence_length = 512
+    config.dataset.signal_dim = 0  # No labels for unlabeled data
     
-    def __init__(self, config: DictConfig):
-        # Ensure dataset-specific config is set
-        if not hasattr(config, 'dataset'):
-            config.dataset = {}
-        config.dataset.name = 'ccre'
-        config.dataset.num_classes = 4
-        config.dataset.sequence_length = 512
-        config.dataset.signal_dim = 0  # No labels for unlabeled data
-        
-        super().__init__(config)
-        
-        # Replace the vocab_embed with our custom one that doesn't need signals
-        vocab_size = config.dataset.num_classes
-        self.vocab_embed = cCREVocabEmbedding(
-            vocab_dim=vocab_size,
-            dim=config.model.hidden_size
-        )
-    
-    def forward(self, indices: torch.Tensor, labels: torch.Tensor, 
-                train: bool, sigma: torch.Tensor) -> torch.Tensor:
-        """
-        cCRE-specific forward pass for unlabeled data.
-        
-        Completely ignores labels and does unconditional generation.
-        """
-        # Can now call super with any labels since our vocab_embed ignores them
-        return super().forward(indices, labels, train, sigma)
-
-
-class cCREConvolutionalModel(ConvolutionalModel):
-    """cCRE-specific convolutional model wrapper."""
-    
-    def __init__(self, config: DictConfig):
-        # Ensure dataset-specific config is set
-        if not hasattr(config, 'dataset'):
-            config.dataset = {}
-        config.dataset.name = 'ccre'
-        config.dataset.num_classes = 4
-        config.dataset.sequence_length = 512
-        config.dataset.signal_dim = 0  # No labels for unlabeled data
-        
-        super().__init__(config)
-    
-    def forward(self, indices: torch.Tensor, labels: torch.Tensor, 
-                train: bool, sigma: torch.Tensor) -> torch.Tensor:
-        """
-        cCRE-specific forward pass for unlabeled data.
-        
-        Completely ignores labels and does unconditional generation.
-        """
-        # Create dummy labels with shape (batch_size, 0) for unconditional generation
-        batch_size = indices.shape[0]
-        dummy_labels = torch.zeros(batch_size, 0, device=indices.device, dtype=torch.float32)
-        return super().forward(indices, dummy_labels, train, sigma)
+    # Use base convolutional model - it now handles labels=None properly
+    return ConvolutionalModel(config)
 
 
 def create_model(config: DictConfig, architecture: str):
@@ -98,9 +53,9 @@ def create_model(config: DictConfig, architecture: str):
         Model instance
     """
     if architecture.lower() == 'transformer':
-        return cCRETransformerModel(config)
+        return create_ccre_transformer_model(config)
     elif architecture.lower() == 'convolutional':
-        return cCREConvolutionalModel(config)
+        return create_ccre_convolutional_model(config)
     else:
         raise ValueError(f"Unknown architecture: {architecture}")
 
@@ -129,12 +84,7 @@ def load_trained_model(checkpoint_path: str, config: DictConfig, architecture: s
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
     
     # Create model
-    if architecture.lower() == 'transformer':
-        model = cCRETransformerModel(config)
-    elif architecture.lower() == 'convolutional':
-        model = cCREConvolutionalModel(config)
-    else:
-        raise ValueError(f"Unsupported architecture: {architecture}")
+    model = create_model(config, architecture)
     
     model.to(device)
     
