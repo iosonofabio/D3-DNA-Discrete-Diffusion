@@ -128,8 +128,12 @@ class EmbeddingLayer(nn.Module):
 
     def forward(self, x, y):
         vocab_embed = self.embedding[x] #return only this if label embedding is used
-        signal_embed = self.signal_embedding(y.to(torch.float32))
-        return torch.add(vocab_embed, signal_embed[:, None, :]) #[:, None, :] extra for deepstarr
+        if y is not None:
+            signal_embed = self.signal_embedding(y.to(torch.float32))
+            return torch.add(vocab_embed, signal_embed[:, None, :]) #[:, None, :] extra for deepstarr
+        else:
+            # For unconditional generation, return only vocab embedding
+            return vocab_embed
 
 
 class DDitFinalLayer(nn.Module):
@@ -207,14 +211,14 @@ class TransformerModel(nn.Module):
         # Model configuration
         self.scale_by_sigma = getattr(config.model, 'scale_by_sigma', False)
 
-    def forward(self, indices: torch.Tensor, labels: torch.Tensor, 
+    def forward(self, indices: torch.Tensor, labels: Optional[torch.Tensor], 
                 train: bool, sigma: torch.Tensor) -> torch.Tensor:
         """
         Forward pass through the transformer.
         
         Args:
             indices: Token indices (batch_size, seq_length)
-            labels: Label/signal tensor (batch_size, signal_dim)
+            labels: Label/signal tensor (batch_size, signal_dim) or None for unconditional
             train: Training mode flag
             sigma: Noise level (batch_size,)
             

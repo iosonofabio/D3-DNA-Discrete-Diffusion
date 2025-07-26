@@ -60,7 +60,7 @@ class Predictor(abc.ABC):
 class EulerPredictor(Predictor):
     def update_fn(self, score_fn, x, labels, t, step_size):
         sigma, dsigma = self.noise(t)
-        score = score_fn(x, labels, sigma)
+        score = score_fn(x, sigma, labels)
 
         rev_rate = step_size * dsigma[..., None] * self.graph.reverse_rate(x, score)
         x = self.graph.sample_rate(x, rev_rate)
@@ -95,7 +95,7 @@ class Denoiser:
     def update_fn(self, score_fn, x, labels, t):
         sigma = self.noise(t)[0]
 
-        score = score_fn(x, labels, sigma)
+        score = score_fn(x, sigma, labels)
         stag_score = self.graph.staggered_score(score, sigma)
         probs = stag_score * self.graph.transp_transition(x, sigma)
         # truncate probabilities
