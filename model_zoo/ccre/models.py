@@ -14,6 +14,19 @@ from model.transformer import TransformerModel, create_transformer_model
 from model.cnn import ConvolutionalModel, create_convolutional_model
 
 
+class cCREVocabEmbedding(torch.nn.Module):
+    """Vocabulary embedding without signal conditioning for cCRE."""
+    
+    def __init__(self, vocab_dim: int, dim: int):
+        super().__init__()
+        self.embedding = torch.nn.Parameter(torch.empty((vocab_dim, dim)))
+        torch.nn.init.kaiming_uniform_(self.embedding, a=torch.sqrt(torch.tensor(5.0)))
+    
+    def forward(self, x, y):
+        # Only return vocabulary embedding, ignore y (labels)
+        return self.embedding[x]
+
+
 class cCRETransformerModel(TransformerModel):
     """cCRE-specific transformer model wrapper."""
     
@@ -27,6 +40,23 @@ class cCRETransformerModel(TransformerModel):
         config.dataset.signal_dim = 0  # No labels for unlabeled data
         
         super().__init__(config)
+        
+        # Replace the vocab_embed with our custom one that doesn't need signals
+        vocab_size = config.dataset.num_classes
+        self.vocab_embed = cCREVocabEmbedding(
+            vocab_dim=vocab_size,
+            dim=config.model.hidden_size
+        )
+    
+    def forward(self, indices: torch.Tensor, labels: torch.Tensor, 
+                train: bool, sigma: torch.Tensor) -> torch.Tensor:
+        """
+        cCRE-specific forward pass for unlabeled data.
+        
+        Completely ignores labels and does unconditional generation.
+        """
+        # Can now call super with any labels since our vocab_embed ignores them
+        return super().forward(indices, labels, train, sigma)
 
 
 class cCREConvolutionalModel(ConvolutionalModel):
@@ -48,35 +78,12 @@ class cCREConvolutionalModel(ConvolutionalModel):
         """
         cCRE-specific forward pass for unlabeled data.
         
-        For cCRE, we ignore the labels parameter since there are no labels.
-        This is an unconditional generation setup.
+        Completely ignores labels and does unconditional generation.
         """
-        # Convert indices to one-hot
-        x = torch.nn.functional.one_hot(indices, num_classes=4).float()
-        
-        # For unlabeled data, we don't need label processing
-        # x shape: (batch_size, seq_length, 4)
-        x = x.permute(0, 2, 1)  # (batch_size, 4, seq_length)
-        
-        # Apply initial convolution
-        out = self.act(self.linear(x))
-        
-        # Time conditioning
-        c = torch.nn.functional.silu(self.sigma_map(sigma))
-        
-        # Apply conv blocks
-        for block, dense, norm in zip(self.conv_blocks, self.denses, self.norms):
-            h = self.act(block(norm(out + dense(c)[:, :, None])))
-            if h.shape == out.shape:
-                out = h + out
-            else:
-                out = h
-        
-        # Final output
-        x = self.final(out)
-        x = x.permute(0, 2, 1)
-        
-        return x
+        # Create dummy labels with shape (batch_size, 0) for unconditional generation
+        batch_size = indices.shape[0]
+        dummy_labels = torch.zeros(batch_size, 0, device=indices.device, dtype=torch.float32)
+        return super().forward(indices, dummy_labels, train, sigma)
 
 
 def create_model(config: DictConfig, architecture: str):

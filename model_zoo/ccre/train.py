@@ -38,15 +38,12 @@ class cCRELightningModule(BaseD3LightningModule):
         """Process cCRE batch data.
         
         For cCRE, the data loader returns (sequence, sequence) pairs since
-        there are no labels. We return inputs and None/empty labels for 
-        unconditional generation.
+        there are no labels. We return inputs and None for unconditional generation.
         """
         if isinstance(batch, (list, tuple)) and len(batch) == 2:
             inputs, targets = batch
-            # For unlabeled data, return inputs and None/empty labels
-            batch_size = inputs.shape[0]
-            empty_labels = torch.zeros(batch_size, 0, device=inputs.device)  # Empty labels
-            return inputs, empty_labels
+            # For unlabeled data, return inputs and None (no labels)
+            return inputs, None
         else:
             raise ValueError(f"Expected (inputs, targets) pair, got {type(batch)}")
 
