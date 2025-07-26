@@ -24,7 +24,7 @@ class cCRETransformerModel(TransformerModel):
         config.dataset.name = 'ccre'
         config.dataset.num_classes = 4
         config.dataset.sequence_length = 512
-        # No signal_dim for unlabeled data
+        config.dataset.signal_dim = 0  # No labels for unlabeled data
         
         super().__init__(config)
 
@@ -39,7 +39,7 @@ class cCREConvolutionalModel(ConvolutionalModel):
         config.dataset.name = 'ccre'
         config.dataset.num_classes = 4
         config.dataset.sequence_length = 512
-        # No signal_dim for unlabeled data
+        config.dataset.signal_dim = 0  # No labels for unlabeled data
         
         super().__init__(config)
     
