@@ -53,7 +53,7 @@ class DeepSTARRDataModule(BaseD3DataModule):
     def setup(self, stage: str = None):
         """Setup DeepSTARR datasets."""
         # Use DeepSTARR-specific data loading
-        self.train_ds, self.val_ds = get_deepstarr_datasets(self.cfg.paths.data_file)
+        self.train_ds, self.val_ds, _ = get_deepstarr_datasets(self.cfg.paths.data_file)
         print(f"DeepSTARR dataset loaded: {len(self.train_ds)} train, {len(self.val_ds)} val samples")
 
 

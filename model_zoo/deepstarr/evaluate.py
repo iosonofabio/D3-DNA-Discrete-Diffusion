@@ -43,7 +43,7 @@ class DeepSTARREvaluator(BaseEvaluator):
     def create_dataloader(self, config: OmegaConf, split: str = 'test', batch_size: Optional[int] = None):
         """Create DeepSTARR dataloader."""
         # Load datasets
-        train_ds, val_ds, test_ds = get_deepstarr_datasets()
+        train_ds, val_ds, test_ds = get_deepstarr_datasets(config.paths.data_file)
         
         # Select appropriate dataset
         if split == 'train':
