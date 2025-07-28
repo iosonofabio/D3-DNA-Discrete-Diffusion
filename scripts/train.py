@@ -400,7 +400,8 @@ class BaseTrainer:
                 name=self.cfg.wandb.get('name', f"{self.dataset_name}_{self.cfg.model.architecture}"),
                 entity=self.cfg.wandb.get('entity', None),
                 # config=config_dict,
-                save_dir=self.work_dir
+                save_dir=self.work_dir, 
+                id=self.cfg.wandb.get('id', None),
             )
             loggers.append(wandb_logger)
         

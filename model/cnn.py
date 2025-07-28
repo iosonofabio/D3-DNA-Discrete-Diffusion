@@ -105,8 +105,8 @@ class ConvolutionalModel(nn.Module):
         
         return nn.ModuleList(blocks)
     
-    def forward(self, indices: torch.Tensor, labels: Optional[torch.Tensor], 
-                train: bool, sigma: torch.Tensor) -> torch.Tensor:
+    def forward(self, indices: torch.Tensor, labels: Optional[torch.Tensor] = None, 
+                train: bool = True, sigma: torch.Tensor = None) -> torch.Tensor:
         """
         Forward pass through the convolutional model.
         

@@ -123,7 +123,7 @@ class EmbeddingLayer(nn.Module):
         super().__init__()
         self.embedding = nn.Parameter(torch.empty((vocab_dim, dim)))
         #remove if label embedding is used
-        self.signal_embedding = nn.Linear(signal_dim, dim)  
+        self.signal_embedding = nn.Linear(2, dim)  #should be signal_dim
         torch.nn.init.kaiming_uniform_(self.embedding, a=math.sqrt(5))
 
     def forward(self, x, y):
@@ -213,8 +213,8 @@ class TransformerModel(nn.Module):
         # Model configuration
         self.scale_by_sigma = getattr(config.model, 'scale_by_sigma', False)
 
-    def forward(self, indices: torch.Tensor, labels: Optional[torch.Tensor], 
-                train: bool, sigma: torch.Tensor) -> torch.Tensor:
+    def forward(self, indices: torch.Tensor, labels: Optional[torch.Tensor] = None, 
+                train: bool = True, sigma: torch.Tensor = None) -> torch.Tensor:
         """
         Forward pass through the transformer.
         

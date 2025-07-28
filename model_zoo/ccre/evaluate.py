@@ -125,10 +125,9 @@ class cCREEvaluator(BaseEvaluator):
                 embedding = F.adaptive_avg_pool1d(embedding, 1).squeeze(-1)
             else:
                 # Fallback: use the full forward pass with dummy conditioning
-                dummy_labels = torch.zeros(indices.shape[0], 1, device=indices.device)
                 dummy_sigma = torch.ones(indices.shape[0], device=indices.device) * 0.1
                 try:
-                    output = model(indices, dummy_labels, train=False, sigma=dummy_sigma)
+                    output = model(indices, train=False, sigma=dummy_sigma)
                     # Use mean of output as embedding
                     embedding = output.mean(dim=1)
                 except:

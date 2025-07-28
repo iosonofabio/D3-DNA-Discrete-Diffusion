@@ -69,9 +69,7 @@ class Genome:
             DNA sequence string
         """
         if self.data is None:
-            # Return dummy sequence if genome not available
-            length = end - start
-            return 'N' * length
+            raise ValueError("Genome not initialized. Please initialize with a valid genome path.")
             
         try:
             res = self.data[chrom][start:end]
@@ -79,9 +77,7 @@ class Genome:
                 res = res.reverse.complement
             return str(res).upper()
         except Exception as e:
-            print(f"Warning: Could not fetch sequence {chrom}:{start}-{end}: {e}")
-            length = end - start
-            return 'N' * length
+            raise ValueError(f"Could not fetch sequence {chrom}:{start}-{end}: {e}")
 
 
 class cCREVEP(torch.nn.Module):
@@ -113,7 +109,7 @@ class cCREVEP(torch.nn.Module):
             Token indices tensor
         """
         # DNA to index mapping
-        base_to_idx = {'A': 0, 'C': 1, 'G': 2, 'T': 3, 'N': 0}  # Map N to A
+        base_to_idx = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
         
         # Convert to indices
         indices = [base_to_idx.get(base.upper(), 0) for base in sequence]
@@ -142,9 +138,8 @@ class cCREVEP(torch.nn.Module):
                     embedding = embedding.mean(dim=1)  # Pool over sequence length
                 except:
                     # Fallback: use forward pass with dummy inputs
-                    dummy_labels = torch.zeros(1, 1, device=self.device)
                     dummy_sigma = torch.ones(1, device=self.device) * 0.1
-                    output = self.model(indices, dummy_labels, train=False, sigma=dummy_sigma)
+                    output = self.model(indices, train=False, sigma=dummy_sigma)
                     embedding = output.mean(dim=1)
             else:
                 # For convolutional models
@@ -156,9 +151,8 @@ class cCREVEP(torch.nn.Module):
                     embedding = F.adaptive_avg_pool1d(embedding, 1).squeeze(-1)
                 except:
                     # Fallback
-                    dummy_labels = torch.zeros(1, 1, device=self.device)
                     dummy_sigma = torch.ones(1, device=self.device) * 0.1
-                    output = self.model(indices, dummy_labels, train=False, sigma=dummy_sigma)
+                    output = self.model(indices, train=False, sigma=dummy_sigma)
                     embedding = output.mean(dim=1)
         
         return embedding
@@ -203,7 +197,7 @@ def tokenize_sequences(sequences: List[str]) -> torch.Tensor:
     Returns:
         Tensor of token indices
     """
-    base_to_idx = {'A': 0, 'C': 1, 'G': 2, 'T': 3, 'N': 0}
+    base_to_idx = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
     
     tokenized = []
     for seq in sequences:
@@ -251,10 +245,9 @@ def get_tokenized_sequences(variants_df: pd.DataFrame, genome: Genome, window_si
                       f"(expected {ref[i]}, got {seq_array[center_pos]})")
         
         # Create reference and alternate sequences
-        ref_seq = seq
+        ref_seq = ''.join(seq_array)
         alt_seq_array = seq_array.copy()
-        if center_pos < len(alt_seq_array):
-            alt_seq_array[center_pos] = alt[i].upper()
+        alt_seq_array[center_pos] = alt[i].upper()
         alt_seq = ''.join(alt_seq_array)
         
         sequences_ref.append(ref_seq)

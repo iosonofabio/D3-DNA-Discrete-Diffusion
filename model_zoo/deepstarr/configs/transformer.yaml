@@ -95,6 +95,7 @@ wandb:
   entity: d3-cshl
   tags: []
   notes: ""
+  id: "j465slsx"
 
 # Paths - provide full paths
 paths:
