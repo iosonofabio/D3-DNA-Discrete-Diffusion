@@ -79,7 +79,7 @@ class AnalyticPredictor(Predictor):
         next_sigma = self.noise(t - step_size)[0]
         dsigma = curr_sigma - next_sigma
 
-        score = score_fn(x, labels, curr_sigma)
+        score = score_fn(x, curr_sigma, labels)
 
         stag_score = self.graph.staggered_score(score, dsigma)
         # print (stag_score.shape)
