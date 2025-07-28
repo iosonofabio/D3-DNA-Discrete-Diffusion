@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-DeepSTARR Training Script
+cCRE Training Script
 
-This script provides training functionality specifically for the DeepSTARR dataset,
-inheriting from the base training classes and implementing DeepSTARR-specific
-model creation and data loading.
+This script provides training functionality specifically for the cCRE dataset,
+inheriting from the base training classes and implementing cCRE-specific
+model creation and data loading for unlabeled 512bp sequences.
 """
 
 import os
@@ -17,80 +17,95 @@ import torch
 # Package imports
 
 from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args
-from model_zoo.deepstarr.models import create_model
-from model_zoo.deepstarr.data import get_deepstarr_datasets
-from model_zoo.deepstarr.sp_mse_callback import create_deepstarr_sp_mse_callback
+from model_zoo.ccre.models import create_model
+from model_zoo.ccre.data import get_ccre_datasets
 from omegaconf import OmegaConf
 from utils.utils import update_cfg_with_unknown_args
 
-class DeepSTARRLightningModule(BaseD3LightningModule):
-    """Lightning module specifically for DeepSTARR dataset."""
+
+class cCRELightningModule(BaseD3LightningModule):
+    """Lightning module specifically for cCRE dataset."""
     
     def __init__(self, cfg, architecture: str = 'transformer'):
-        super().__init__(cfg, dataset_name='deepstarr')
+        super().__init__(cfg, dataset_name='ccre')
         self.architecture = architecture
         
     def create_model(self):
-        """Create DeepSTARR-specific model."""
+        """Create cCRE-specific model."""
         return create_model(self.cfg, self.architecture)
         
     def process_batch(self, batch):
-        """Process DeepSTARR batch data."""
-        # DeepSTARR data comes as (inputs, targets) pairs
+        """Process cCRE batch data.
+        
+        For cCRE, the data loader returns (sequence, sequence) pairs since
+        there are no labels. We return inputs and None for unconditional generation.
+        """
         if isinstance(batch, (list, tuple)) and len(batch) == 2:
             inputs, targets = batch
-            return inputs, targets
+            # For unlabeled data, return inputs and None (no labels)
+            return inputs, None
         else:
             raise ValueError(f"Expected (inputs, targets) pair, got {type(batch)}")
 
 
-class DeepSTARRDataModule(BaseD3DataModule):
-    """Data module specifically for DeepSTARR dataset."""
+class cCREDataModule(BaseD3DataModule):
+    """Data module specifically for cCRE dataset."""
     
     def __init__(self, cfg):
-        super().__init__(cfg, dataset_name='deepstarr')
+        super().__init__(cfg, dataset_name='ccre')
         
     def setup(self, stage: str = None):
-        """Setup DeepSTARR datasets."""
-        # Use DeepSTARR-specific data loading
-        self.train_ds, self.val_ds, _ = get_deepstarr_datasets(self.cfg.paths.data_file)
-        print(f"DeepSTARR dataset loaded: {len(self.train_ds)} train, {len(self.val_ds)} val samples")
+        """Setup cCRE datasets."""
+        # Get split configuration from config
+        train_ratio = getattr(self.cfg.data, 'train_ratio', 0.95)
+        valid_ratio = getattr(self.cfg.data, 'valid_ratio', 0.05)
+        split_seed = getattr(self.cfg.data, 'split_seed', 42)
+        
+        # Use cCRE-specific data loading
+        self.train_ds, self.val_ds = get_ccre_datasets(
+            self.cfg.paths.data_file,
+            train_ratio=train_ratio,
+            valid_ratio=valid_ratio,
+            seed=split_seed
+        )
+        print(f"cCRE dataset loaded: {len(self.train_ds)} train, {len(self.val_ds)} val samples")
 
 
-class DeepSTARRTrainer(BaseTrainer):
-    """Trainer specifically for DeepSTARR dataset."""
+class cCRETrainer(BaseTrainer):
+    """Trainer specifically for cCRE dataset."""
     
     def __init__(self, architecture: str, config_path: str = None, work_dir: str = None,
                  more_cfg_args: list = None):
-        # Load DeepSTARR config
+        # Load cCRE config
         if config_path:
             cfg = OmegaConf.load(config_path)
         else:
-            # Use default DeepSTARR config
+            # Use default cCRE config
             config_file = Path(__file__).parent / 'configs' / f'{architecture}.yaml'
             if not config_file.exists():
                 raise FileNotFoundError(f"Config file not found: {config_file}")
             cfg = OmegaConf.load(config_file)
             
-        super().__init__(cfg, 'deepstarr', work_dir)
+        super().__init__(cfg, 'ccre', work_dir)
         self.architecture = architecture
         
     def create_lightning_module(self):
-        """Create DeepSTARR Lightning module."""
-        return DeepSTARRLightningModule(self.cfg, self.architecture)
+        """Create cCRE Lightning module."""
+        return cCRELightningModule(self.cfg, self.architecture)
         
     def create_data_module(self):
-        """Create DeepSTARR data module."""
-        return DeepSTARRDataModule(self.cfg)
+        """Create cCRE data module."""
+        return cCREDataModule(self.cfg)
     
     def setup_callbacks(self):
-        """Setup training callbacks including dataset-specific SP-MSE callback."""
+        """Setup training callbacks.
+        
+        Note: No SP-MSE callback for cCRE since there are no labels.
+        """
         callbacks = super().setup_callbacks()
         
-        # Add DeepSTARR-specific SP-MSE callback if enabled
-        sp_mse_callback = create_deepstarr_sp_mse_callback(self.cfg)
-        if sp_mse_callback is not None:
-            callbacks.append(sp_mse_callback)
+        # cCRE doesn't need SP-MSE callbacks since there are no labels
+        print("Note: SP-MSE validation disabled for unlabeled cCRE dataset")
         
         return callbacks
 
@@ -98,7 +113,7 @@ class DeepSTARRTrainer(BaseTrainer):
 def main():
     """Main training function."""
     parser = parse_base_args()
-    parser.description = 'DeepSTARR Training Script'
+    parser.description = 'cCRE Training Script'
     args, unknown = parser.parse_known_args()
 
     # Set all seeds for reproducibility
@@ -109,7 +124,7 @@ def main():
         torch.cuda.manual_seed_all(args.seed)
 
     # Create trainer (loads cfg)
-    trainer = DeepSTARRTrainer(
+    trainer = cCRETrainer(
         architecture=args.architecture,
         config_path=args.config,
         work_dir=args.work_dir,

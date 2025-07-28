@@ -43,7 +43,7 @@ class DeepSTARREvaluator(BaseEvaluator):
     def create_dataloader(self, config: OmegaConf, split: str = 'test', batch_size: Optional[int] = None):
         """Create DeepSTARR dataloader."""
         # Load datasets
-        train_ds, val_ds, test_ds = get_deepstarr_datasets()
+        train_ds, val_ds, test_ds = get_deepstarr_datasets(config.paths.data_file)
         
         # Select appropriate dataset
         if split == 'train':
@@ -115,6 +115,11 @@ def main():
     parser = parse_base_args()
     args = parser.parse_args()
     
+    # Set save_sequences default to True for DeepSTARR
+    if not hasattr(args, 'save_sequences') or args.save_sequences is False:
+        args.save_sequences = True
+        print("✓ DeepSTARR: Enabled sequence saving by default")
+    
     # Load config if not provided
     if not args.config:
         try:
@@ -143,7 +148,8 @@ def main():
         steps=args.steps,
         batch_size=args.batch_size,
         architecture=args.architecture,
-        show_progress=args.show_progress
+        show_progress=args.show_progress,
+        save_sequences=args.save_sequences
     )
     
     # Print and save results

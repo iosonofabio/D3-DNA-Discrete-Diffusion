@@ -229,7 +229,7 @@ class BaseEvaluator:
                               oracle_checkpoint: str, data_path: str,
                               split: str = 'test', steps: Optional[int] = None, 
                               batch_size: Optional[int] = None, architecture: str = 'transformer',
-                              show_progress: bool = False) -> Dict[str, Any]:
+                              show_progress: bool = False, save_sequences: bool = False) -> Dict[str, Any]:
         """
         Evaluate model by sampling sequences and computing SP-MSE with oracle.
         
@@ -243,6 +243,7 @@ class BaseEvaluator:
             batch_size: Batch size for evaluation (optional)
             architecture: Architecture type
             show_progress: Whether to show progress bar during sampling
+            save_sequences: Whether to save sampled sequences as NPZ file
             
         Returns:
             Dictionary of evaluation results including SP-MSE
@@ -262,6 +263,13 @@ class BaseEvaluator:
         sampled_sequences, target_labels = self.sample_sequences_for_evaluation(
             checkpoint_path, config, dataloader, steps, architecture, show_progress
         )
+        
+        # Save sequences as NPZ if requested
+        if save_sequences:
+            # Create output path based on checkpoint directory
+            checkpoint_dir = os.path.dirname(checkpoint_path)
+            npz_path = os.path.join(checkpoint_dir, "sample.npz")
+            self.save_sequences_as_npz(sampled_sequences, npz_path)
         
         # Load oracle model
         print("Loading oracle model for SP-MSE evaluation...")
@@ -295,6 +303,18 @@ class BaseEvaluator:
         print(f"SP-MSE: {sp_mse:.6f}")
         
         return results
+    
+    def save_sequences_as_npz(self, sequences: torch.Tensor, save_path: str):
+        """
+        Save sampled sequences as NPZ file.
+        
+        Args:
+            sequences: Sampled sequences tensor (batch_size, seq_len, 4)
+            save_path: Path to save the NPZ file
+        """
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        np.savez(save_path, sequences.cpu().numpy())
+        print(f"✓ Saved {sequences.shape[0]} sequences to {save_path}")
 
     def evaluate(self, checkpoint_path: str, config: OmegaConf, architecture: str = 'transformer',
                  split: str = 'test', oracle_checkpoint: Optional[str] = None,
@@ -368,6 +388,7 @@ def parse_base_args():
     parser.add_argument('--output', help='Output file for results')
     parser.add_argument('--batch_size', type=int, help='Batch size for evaluation')
     parser.add_argument('--show_progress', action='store_true', help='Show progress bar during sampling')
+    parser.add_argument('--save_sequences', action='store_true', help='Save sampled sequences as NPZ file')
     
     return parser
 
@@ -414,7 +435,8 @@ def main_evaluate(evaluator: BaseEvaluator, args):
         steps=getattr(args, 'steps', None),
         batch_size=args.batch_size,
         architecture=args.architecture,
-        show_progress=show_progress
+        show_progress=show_progress,
+        save_sequences=args.save_sequences
     )
     
     # Print results
