@@ -159,13 +159,16 @@ def main():
     
     # Run evaluation (always includes sampling + SP-MSE computation)
     metrics = evaluator.evaluate_with_sampling(
-        model_path=args.model_path,
+        checkpoint_path=args.checkpoint,
         config=config,
         oracle_checkpoint=args.oracle_checkpoint,
         data_path=args.data_path,
         split=args.split,
         steps=args.steps,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        architecture=args.architecture,
+        show_progress=args.show_progress,
+        save_sequences=getattr(args, 'save_sequences', False)
     )
     
     # Print and save results
