@@ -294,18 +294,6 @@ class BaseD3LightningModule(pl.LightningModule):
                     print(f"⚠ Could not load EMA state: {e}")
             
             return result
-    
-    def load_from_original_checkpoint_dict(self, state_dict: dict):
-        """Load from original checkpoint dictionary."""
-        # Load model weights
-        if 'model' in state_dict:
-            self.score_model.load_state_dict(state_dict['model'], strict=False)
-        
-        # Load EMA weights  
-        if 'ema' in state_dict and self.ema is not None:
-            self.ema.load_state_dict(state_dict['ema'], device=self.device)
-            
-        return state_dict.get('step', 0)
 
 
 class BaseD3DataModule(pl.LightningDataModule):
