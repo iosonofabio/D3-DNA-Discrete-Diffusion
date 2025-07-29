@@ -53,6 +53,7 @@ class BaseSPMSEValidationCallback(Callback, ABC):
         self.best_sp_mse = float('inf')
         self.steps_since_improvement = 0
         self.validation_data_cache = None
+        self.best_checkpoint_path = None  # Track current best checkpoint for replacement
         
         if not self.enabled:
             return
@@ -106,8 +107,10 @@ class BaseSPMSEValidationCallback(Callback, ABC):
         if stage == 'fit':
             self.oracle_model = self.load_oracle_model()
             if self.oracle_model is not None:
+                # Move oracle model to the same device as the main model  
+                self.oracle_model = self.oracle_model.to(pl_module.device)
                 self.oracle_model.eval()
-                print(f"SP-MSE Callback: Loaded oracle model from {self.oracle_path}")
+                print(f"SP-MSE Callback: Loaded oracle model from {self.oracle_path} on device {pl_module.device}")
             else:
                 print(f"SP-MSE Callback: Failed to load oracle model, disabling callback")
                 self.enabled = False
@@ -163,6 +166,10 @@ class BaseSPMSEValidationCallback(Callback, ABC):
         """Run SP-MSE validation"""
         device = pl_module.device
         
+        # Ensure oracle model is on the correct device
+        if self.oracle_model is not None:
+            self.oracle_model = self.oracle_model.to(device)
+        
         # Get validation data
         val_sequences, val_targets = self._get_validation_data(trainer)
         val_targets = val_targets.to(device)
@@ -200,12 +207,22 @@ class BaseSPMSEValidationCallback(Callback, ABC):
                 sp_mse = (val_score - generated_score) ** 2
                 mean_sp_mse = torch.mean(sp_mse).cpu().item()
                 
-                # Log metrics
+                # Log metrics to all loggers (including WandB)
                 if trainer.logger:
-                    trainer.logger.log_metrics({
-                        'sp_mse/validation': mean_sp_mse,
-                        'sp_mse/best': self.best_sp_mse
-                    }, step=trainer.global_step)
+                    # Handle multiple loggers (TensorBoard and WandB)
+                    if hasattr(trainer.logger, 'experiment'):
+                        # Single logger
+                        trainer.logger.log_metrics({
+                            'sp_mse/validation': mean_sp_mse,
+                            'sp_mse/best': self.best_sp_mse
+                        }, step=trainer.global_step)
+                    else:
+                        # Multiple loggers (LoggerCollection)
+                        for logger in trainer.logger:
+                            logger.log_metrics({
+                                'sp_mse/validation': mean_sp_mse,
+                                'sp_mse/best': self.best_sp_mse
+                            }, step=trainer.global_step)
                 
                 print(f"Step {trainer.global_step}: SP-MSE = {mean_sp_mse:.6f}, Best = {self.best_sp_mse:.6f}")
                 
@@ -214,13 +231,20 @@ class BaseSPMSEValidationCallback(Callback, ABC):
                     self.best_sp_mse = mean_sp_mse
                     self.steps_since_improvement = 0
                     
-                    # Save best checkpoint
-                    checkpoint_path = os.path.join(
-                        trainer.default_root_dir, 
-                        f"best_sp_mse_checkpoint_step_{trainer.global_step}.ckpt"
-                    )
-                    trainer.save_checkpoint(checkpoint_path)
-                    print(f"Saved best SP-MSE checkpoint: {checkpoint_path}")
+                    # Remove previous best checkpoint if it exists
+                    if self.best_checkpoint_path and os.path.exists(self.best_checkpoint_path):
+                        os.remove(self.best_checkpoint_path)
+                        # print(f"Removed previous best SP-MSE checkpoint: {self.best_checkpoint_path}")
+                    
+                    # Save new best checkpoint in checkpoints directory
+                    checkpoints_dir = os.path.join(trainer.default_root_dir, "checkpoints")
+                    os.makedirs(checkpoints_dir, exist_ok=True)
+                    
+                    checkpoint_filename = f"sp-mse_{mean_sp_mse:.6f}_step_{trainer.global_step}.ckpt"
+                    self.best_checkpoint_path = os.path.join(checkpoints_dir, checkpoint_filename)
+                    
+                    trainer.save_checkpoint(self.best_checkpoint_path)
+                    # print(f"Saved best SP-MSE checkpoint: {self.best_checkpoint_path}")
                     
                 else:
                     self.steps_since_improvement += 1
