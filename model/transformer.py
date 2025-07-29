@@ -93,7 +93,7 @@ class DDiTBlock(nn.Module):
         if seqlens is None:
             cu_seqlens = torch.arange(
                 0, (batch_size + 1) * seq_len, step=seq_len,
-                dtype=torch.int32, device=qkv.device
+                dtype=torch.int32, device=x.device
             )
         else:
             cu_seqlens = seqlens.cumsum(-1)
@@ -115,15 +115,15 @@ class DDiTBlock(nn.Module):
 
 
 class EmbeddingLayer(nn.Module):
-    def __init__(self, dim, vocab_dim):
+    def __init__(self, dim, vocab_dim, signal_dim=2):
         """
         Mode arg: 0 -> use a learned layer, 1 -> use eigenvectors, 
         2-> add in eigenvectors, 3 -> use pretrained embedding matrix
         """
         super().__init__()
         self.embedding = nn.Parameter(torch.empty((vocab_dim, dim)))
-        #remove if label embedding is used
-        self.signal_embedding = nn.Linear(2, dim)  
+        # Signal embedding layer for processing label/signal data
+        self.signal_embedding = nn.Linear(signal_dim, dim)  
         torch.nn.init.kaiming_uniform_(self.embedding, a=math.sqrt(5))
 
     def forward(self, x, y):
@@ -181,7 +181,9 @@ class TransformerModel(nn.Module):
         self.vocab_embed = EmbeddingLayer(
             dim=config.model.hidden_size, 
             vocab_dim=vocab_size,
+            signal_dim=config.dataset.signal_dim,
         )
+
         self.sigma_map = TimestepEmbedder(config.model.cond_dim)
         self.label_embed = LabelEmbedder(num_classes, config.model.cond_dim, class_dropout_prob)
         self.rotary_emb = rotary.Rotary(config.model.hidden_size // config.model.n_heads)

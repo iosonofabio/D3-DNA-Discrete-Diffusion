@@ -3,7 +3,7 @@
 #SBATCH --job-name=d3-dna-diffusion-frac
 #SBATCH --output=full-%A_%a.out
 #SBATCH --error=full-%A_%a.err
-#SBATCH --time=72:00:00
+#SBATCH --time=48:00:00
 #SBATCH --partition=gpuq
 #SBATCH --gres=gpu:h100:2
 #SBATCH --mem=64GB
