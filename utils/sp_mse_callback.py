@@ -106,8 +106,10 @@ class BaseSPMSEValidationCallback(Callback, ABC):
         if stage == 'fit':
             self.oracle_model = self.load_oracle_model()
             if self.oracle_model is not None:
+                # Move oracle model to the same device as the main model  
+                self.oracle_model = self.oracle_model.to(pl_module.device)
                 self.oracle_model.eval()
-                print(f"SP-MSE Callback: Loaded oracle model from {self.oracle_path}")
+                print(f"SP-MSE Callback: Loaded oracle model from {self.oracle_path} on device {pl_module.device}")
             else:
                 print(f"SP-MSE Callback: Failed to load oracle model, disabling callback")
                 self.enabled = False
@@ -162,6 +164,10 @@ class BaseSPMSEValidationCallback(Callback, ABC):
     def _run_sp_mse_validation(self, trainer: Trainer, pl_module: LightningModule):
         """Run SP-MSE validation"""
         device = pl_module.device
+        
+        # Ensure oracle model is on the correct device
+        if self.oracle_model is not None:
+            self.oracle_model = self.oracle_model.to(device)
         
         # Get validation data
         val_sequences, val_targets = self._get_validation_data(trainer)
