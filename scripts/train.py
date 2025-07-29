@@ -220,7 +220,7 @@ class BaseD3LightningModule(pl.LightningModule):
         Also updates the step counter if present.
         """
         loaded_state = torch.load(checkpoint_path, map_location=self.device)
-        state_dict = loaded_state.get('state_dict', checkpoint)
+        state_dict = loaded_state.get('state_dict', loaded_state)
 
         # --- Load model weights (partial) ---
         model_dict = self.score_model.state_dict()
@@ -367,7 +367,11 @@ class BaseTrainer:
     def __init__(self, cfg, dataset_name: str, work_dir: Optional[str] = None):
         self.cfg = cfg
         self.dataset_name = dataset_name
-        self.work_dir = work_dir or f"experiments/{dataset_name}"
+        if work_dir:
+            self.work_dir = work_dir
+        else:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.work_dir = f"experiments/{dataset_name}/{timestamp}"
         
     def create_lightning_module(self) -> BaseD3LightningModule:
         """Create the Lightning module. Must be implemented by subclasses."""
