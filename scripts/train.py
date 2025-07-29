@@ -367,7 +367,11 @@ class BaseTrainer:
     def __init__(self, cfg, dataset_name: str, work_dir: Optional[str] = None):
         self.cfg = cfg
         self.dataset_name = dataset_name
-        self.work_dir = work_dir or f"experiments/{dataset_name}"
+        if work_dir:
+            self.work_dir = work_dir
+        else:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.work_dir = f"experiments/{dataset_name}/{timestamp}"
         
     def create_lightning_module(self) -> BaseD3LightningModule:
         """Create the Lightning module. Must be implemented by subclasses."""
@@ -400,7 +404,8 @@ class BaseTrainer:
                 name=self.cfg.wandb.get('name', f"{self.dataset_name}_{self.cfg.model.architecture}"),
                 entity=self.cfg.wandb.get('entity', None),
                 # config=config_dict,
-                save_dir=self.work_dir
+                save_dir=self.work_dir, 
+                id=self.cfg.wandb.get('id', None),
             )
             loggers.append(wandb_logger)
         
