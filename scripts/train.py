@@ -220,7 +220,7 @@ class BaseD3LightningModule(pl.LightningModule):
         Also updates the step counter if present.
         """
         loaded_state = torch.load(checkpoint_path, map_location=self.device)
-        state_dict = loaded_state.get('state_dict', checkpoint)
+        state_dict = loaded_state.get('state_dict', loaded_state)
 
         # --- Load model weights (partial) ---
         model_dict = self.score_model.state_dict()
