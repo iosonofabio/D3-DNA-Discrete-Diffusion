@@ -1,7 +1,6 @@
 # DeepSTARR Dataset - Convolutional Architecture Configuration
 dataset:
   name: deepstarr
-  data_file: model_zoo/deepstarr/DeepSTARR_data.h5
   sequence_length: 249
   num_classes: 4
   signal_dim: 2
@@ -98,8 +97,8 @@ wandb:
   tags: []
   notes: ""
 
-# Paths (relative to dataset directory)
+# Paths - provide full paths
 paths:
-  data_dir: "."
-  oracle_model: "oracle_models/oracle_DeepSTARR_DeepSTARR_data.ckpt"
+  data_file: "model_zoo/deepstarr/DeepSTARR_data.h5"
+  oracle_model: "model_zoo/deepstarr/oracle_models/oracle_DeepSTARR_DeepSTARR_data.ckpt"
   checkpoints_dir: "checkpoints"

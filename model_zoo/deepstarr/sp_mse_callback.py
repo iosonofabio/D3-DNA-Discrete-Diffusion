@@ -45,6 +45,9 @@ class DeepSTARRSPMSECallback(BaseSPMSEValidationCallback):
         if self.oracle_model is None:
             raise RuntimeError("Oracle model not loaded")
         
+        # Ensure oracle model is on the correct device
+        self.oracle_model = self.oracle_model.to(device)
+        
         # Convert to one-hot if needed
         if sequences.dtype == torch.long:
             sequences_one_hot = F.one_hot(sequences, num_classes=4).float()
