@@ -13,7 +13,7 @@ from pathlib import Path
 
 # Package imports
 
-from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args
+from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args, get_work_dir
 from model_zoo.promoter.models import create_model
 from model_zoo.promoter.data import get_promoter_datasets, get_promoter_dataloaders
 from model_zoo.promoter.sp_mse_callback import create_promoter_sp_mse_callback
@@ -112,7 +112,7 @@ def main():
     trainer = PromoterTrainer(
         architecture=args.architecture,
         config_path=args.config,
-        work_dir=args.work_dir
+        work_dir=get_work_dir(args.work_dir, 'promoter')
     )
     
     # Override WandB settings if provided

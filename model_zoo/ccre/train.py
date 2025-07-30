@@ -16,7 +16,7 @@ import torch
 
 # Package imports
 
-from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args
+from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args, get_work_dir
 from model_zoo.ccre.models import create_model
 from model_zoo.ccre.data import get_ccre_datasets
 from omegaconf import OmegaConf
@@ -127,7 +127,7 @@ def main():
     trainer = cCRETrainer(
         architecture=args.architecture,
         config_path=args.config,
-        work_dir=args.work_dir,
+        work_dir=get_work_dir(args.work_dir, 'ccre'),
         more_cfg_args=unknown,
     )
 

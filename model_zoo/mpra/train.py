@@ -13,7 +13,7 @@ from pathlib import Path
 
 # Package imports
 
-from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args
+from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args, get_work_dir
 from model_zoo.mpra.models import create_model
 from model_zoo.mpra.data import get_mpra_datasets, get_mpra_dataloaders
 from model_zoo.mpra.sp_mse_callback import create_mpra_sp_mse_callback
@@ -101,7 +101,7 @@ def main():
     trainer = MPRATrainer(
         architecture=args.architecture,
         config_path=args.config,
-        work_dir=args.work_dir
+        work_dir=get_work_dir(args.work_dir, 'mpra')
     )
     
     # Override WandB settings if provided
