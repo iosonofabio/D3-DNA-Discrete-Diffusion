@@ -12,8 +12,6 @@ import sys
 from pathlib import Path
 import datetime
 
-# Create timestamp at module level to ensure same timestamp across all GPU processes
-_TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # Package imports
 
@@ -112,12 +110,11 @@ def main():
     parser.description = 'Promoter Training Script'
     args = parser.parse_args()
     
-    # Create trainer - use module-level timestamp to avoid duplicate folders
-    work_dir = args.work_dir if args.work_dir else f"experiments/promoter/{_TIMESTAMP}"
+    # Create trainer
     trainer = PromoterTrainer(
         architecture=args.architecture,
         config_path=args.config,
-        work_dir=work_dir
+        work_dir=args.work_dir
     )
     
     # Override WandB settings if provided

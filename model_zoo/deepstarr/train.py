@@ -15,8 +15,6 @@ import random
 import torch
 import datetime
 
-# Create timestamp at module level to ensure same timestamp across all GPU processes
-_TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # Package imports
 
@@ -112,12 +110,11 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    # Create trainer (loads cfg) - use module-level timestamp to avoid duplicate folders
-    work_dir = args.work_dir if args.work_dir else f"experiments/deepstarr/{_TIMESTAMP}"
+    # Create trainer (loads cfg)
     trainer = DeepSTARRTrainer(
         architecture=args.architecture,
         config_path=args.config,
-        work_dir=work_dir,
+        work_dir=args.work_dir,
         more_cfg_args=unknown,
     )
 

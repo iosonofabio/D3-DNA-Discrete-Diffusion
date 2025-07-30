@@ -370,7 +370,6 @@ class BaseTrainer:
         if work_dir:
             self.work_dir = work_dir
         else:
-            # Fallback if no work_dir provided (shouldn't happen in normal usage)
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             self.work_dir = f"experiments/{dataset_name}/{timestamp}"
         
@@ -483,8 +482,9 @@ class BaseTrainer:
     
     def train(self, resume_from: Optional[str] = None):
         """Main training method."""
-        # Create work directory
-        makedirs(self.work_dir)
+        # Create work directory (only if it doesn't exist to avoid duplicate folders in multi-GPU)
+        if not os.path.exists(self.work_dir):
+            makedirs(self.work_dir)
         
         # Create Lightning components
         lightning_module = self.create_lightning_module()
@@ -505,24 +505,6 @@ class BaseTrainer:
         
         print(f"Training completed. Results saved to: {self.work_dir}")
         return trainer, lightning_module
-
-def get_work_dir(args_work_dir: Optional[str], dataset_name: str) -> str:
-    """
-    Get work directory, creating timestamp-based dir if not provided.
-    This ensures single folder creation in multi-GPU training.
-    
-    Args:
-        args_work_dir: Work directory from command line args
-        dataset_name: Name of the dataset (for folder naming)
-        
-    Returns:
-        Work directory path
-    """
-    if args_work_dir:
-        return args_work_dir
-    else:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        return f"experiments/{dataset_name}/{timestamp}"
 
 def parse_base_args():
     """Parse common command line arguments for training scripts."""
