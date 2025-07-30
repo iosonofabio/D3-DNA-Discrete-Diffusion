@@ -236,8 +236,13 @@ class BaseSPMSEValidationCallback(Callback, ABC):
                         os.remove(self.best_checkpoint_path)
                         # print(f"Removed previous best SP-MSE checkpoint: {self.best_checkpoint_path}")
                     
-                    # Save new best checkpoint in checkpoints directory
-                    checkpoints_dir = os.path.join(trainer.default_root_dir, "checkpoints")
+                    # Save new best checkpoint in checkpoints directory (matching normal checkpoint location)
+                    # Use logger's save_dir to match the work_dir used in normal checkpoint saving
+                    if hasattr(trainer.logger, 'save_dir') and trainer.logger.save_dir:
+                        work_dir = trainer.logger.save_dir
+                    else:
+                        work_dir = trainer.default_root_dir
+                    checkpoints_dir = os.path.join(work_dir, "checkpoints")
                     os.makedirs(checkpoints_dir, exist_ok=True)
                     
                     checkpoint_filename = f"sp-mse_{mean_sp_mse:.6f}_step_{trainer.global_step}.ckpt"
