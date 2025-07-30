@@ -162,7 +162,8 @@ class BaseEvaluator:
             defaults = {
                 'deepstarr': 249,
                 'mpra': 200,
-                'promoter': 1024
+                'promoter': 1024,
+                'atacseq': 1001
             }
             return defaults.get(self.dataset_name.lower(), 249)
     
