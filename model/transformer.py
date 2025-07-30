@@ -115,7 +115,7 @@ class DDiTBlock(nn.Module):
 
 
 class EmbeddingLayer(nn.Module):
-    def __init__(self, dim, vocab_dim, signal_dim=2, signal_dim=2):
+    def __init__(self, dim, vocab_dim, signal_dim=2):
         """
         Mode arg: 0 -> use a learned layer, 1 -> use eigenvectors, 
         2-> add in eigenvectors, 3 -> use pretrained embedding matrix
