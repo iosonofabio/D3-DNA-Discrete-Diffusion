@@ -370,8 +370,22 @@ class BaseTrainer:
         if work_dir:
             self.work_dir = work_dir
         else:
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.work_dir = f"experiments/{dataset_name}/{timestamp}"
+            # Only create timestamp on rank 0 to avoid duplicate folders in multi-GPU training
+            import torch.distributed as dist
+            if not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0:
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                self.work_dir = f"experiments/{dataset_name}/{timestamp}"
+                # In distributed training, broadcast the work_dir to all processes
+                if dist.is_available() and dist.is_initialized():
+                    # Store work_dir as a list to make it mutable for broadcast
+                    work_dir_list = [self.work_dir]
+                    dist.broadcast_object_list(work_dir_list, src=0)
+                    self.work_dir = work_dir_list[0]
+            else:
+                # Non-rank-0 processes wait for broadcast
+                work_dir_list = [None]
+                dist.broadcast_object_list(work_dir_list, src=0)
+                self.work_dir = work_dir_list[0]
         
     def create_lightning_module(self) -> BaseD3LightningModule:
         """Create the Lightning module. Must be implemented by subclasses."""
