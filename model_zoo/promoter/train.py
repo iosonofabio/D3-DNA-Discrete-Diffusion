@@ -10,10 +10,14 @@ model creation and data loading.
 import os
 import sys
 from pathlib import Path
+import datetime
+
+# Create timestamp at module level to ensure same timestamp across all GPU processes
+_TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # Package imports
 
-from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args, get_work_dir
+from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args
 from model_zoo.promoter.models import create_model
 from model_zoo.promoter.data import get_promoter_datasets, get_promoter_dataloaders
 from model_zoo.promoter.sp_mse_callback import create_promoter_sp_mse_callback
@@ -108,11 +112,12 @@ def main():
     parser.description = 'Promoter Training Script'
     args = parser.parse_args()
     
-    # Create trainer
+    # Create trainer - use module-level timestamp to avoid duplicate folders
+    work_dir = args.work_dir if args.work_dir else f"experiments/promoter/{_TIMESTAMP}"
     trainer = PromoterTrainer(
         architecture=args.architecture,
         config_path=args.config,
-        work_dir=get_work_dir(args.work_dir, 'promoter')
+        work_dir=work_dir
     )
     
     # Override WandB settings if provided

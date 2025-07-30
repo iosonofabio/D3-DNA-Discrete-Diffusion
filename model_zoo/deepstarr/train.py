@@ -13,10 +13,14 @@ from pathlib import Path
 import numpy as np
 import random
 import torch
+import datetime
+
+# Create timestamp at module level to ensure same timestamp across all GPU processes
+_TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # Package imports
 
-from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args, get_work_dir
+from scripts.train import BaseD3LightningModule, BaseD3DataModule, BaseTrainer, parse_base_args
 from model_zoo.deepstarr.models import create_model
 from model_zoo.deepstarr.data import get_deepstarr_datasets
 from model_zoo.deepstarr.sp_mse_callback import create_deepstarr_sp_mse_callback
@@ -108,11 +112,12 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    # Create trainer (loads cfg)
+    # Create trainer (loads cfg) - use module-level timestamp to avoid duplicate folders
+    work_dir = args.work_dir if args.work_dir else f"experiments/deepstarr/{_TIMESTAMP}"
     trainer = DeepSTARRTrainer(
         architecture=args.architecture,
         config_path=args.config,
-        work_dir=get_work_dir(args.work_dir, 'deepstarr'),
+        work_dir=work_dir,
         more_cfg_args=unknown,
     )
 
