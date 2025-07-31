@@ -208,8 +208,6 @@ class BaseSPMSEValidationCallback(Callback, ABC):
                 pl_module.log('sp_mse/validation', mean_sp_mse, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
                 pl_module.log('sp_mse/best', self.best_sp_mse, on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
                 
-                print(f"Step {trainer.global_step}: SP-MSE = {mean_sp_mse:.6f}, Best = {self.best_sp_mse:.6f}")
-                
                 # Check if this is the best SP-MSE
                 if mean_sp_mse < self.best_sp_mse:
                     self.best_sp_mse = mean_sp_mse
