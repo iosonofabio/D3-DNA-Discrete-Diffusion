@@ -205,8 +205,8 @@ class BaseSPMSEValidationCallback(Callback, ABC):
                 mean_sp_mse = torch.mean(sp_mse).cpu().item()
                 
                 # Log metrics using Lightning module's log method (automatically handles all loggers)
-                pl_module.log('sp_mse/validation', mean_sp_mse, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
-                pl_module.log('sp_mse/best', self.best_sp_mse, on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
+                pl_module.log('sp_mse/validation', mean_sp_mse, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+                pl_module.log('sp_mse/best', self.best_sp_mse, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
                 
                 # Check if this is the best SP-MSE
                 if mean_sp_mse < self.best_sp_mse:
