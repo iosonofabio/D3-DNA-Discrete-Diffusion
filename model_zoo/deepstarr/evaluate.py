@@ -57,7 +57,7 @@ class DeepSTARREvaluator(BaseEvaluator):
             
         # Use config batch size if not specified
         if batch_size is None:
-            batch_size = getattr(config, 'batch_size', 32)
+            batch_size = getattr(config.eval, 'batch_size', 32)
             
         return DataLoader(
             dataset,

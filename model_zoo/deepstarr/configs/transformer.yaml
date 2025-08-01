@@ -96,10 +96,10 @@ wandb:
   entity: d3-cshl
   tags: []
   notes: ""
-  id: "vvd1880a"
+  # id: "vvd1880a"
 
 # Paths - provide full paths
 paths:
   data_file: "model_zoo/deepstarr/DeepSTARR_data.h5"
-  oracle_model: "model_zoo/deepstarr/oracle_models/oracle_DeepSTARR_DeepSTARR_data.ckpt"
+  oracle_model: "model_zoo/deepstarr/oracle_models/DeepSTARR_combo1_finetune_2.ckpt"
   checkpoints_dir: "checkpoints"

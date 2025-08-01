@@ -92,7 +92,7 @@ wandb:
   enabled: true
   project: d3-dna-diffusion
   name: promoter-transformer
-  entity: null
+  entity: d3-cshl
   tags: []
   notes: ""
 
