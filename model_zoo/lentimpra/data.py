@@ -61,9 +61,10 @@ class LentIMPRADataset(Dataset):
             X = X.permute(0, 2, 1)  # (N, 230, 4) -> (N, 4, 230)
             X = torch.argmax(X, dim=1)  # (N, 4, 230) -> (N, 230)
             
-            # Ensure targets are proper shape - squeeze if needed
-            if y.dim() > 1 and y.shape[1] == 1:
-                y = y.squeeze(1)  # (N, 1) -> (N,)
+            # Ensure targets are proper shape (N, signal_dim)
+            if y.dim() == 1:
+                y = y.unsqueeze(1)  # (N,) -> (N, 1)
+            # Keep (N, 1) shape for signal_dim=1
             
         return X, y
     

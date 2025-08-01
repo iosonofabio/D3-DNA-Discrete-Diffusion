@@ -79,7 +79,7 @@ model:
   type: ddit
   architecture: convolutional
   hidden_size: 768
-  cond_dim: 128
+  cond_dim: 256
   length: 230
   n_blocks: 12
   n_heads: 12
