@@ -90,7 +90,7 @@ model:
 # Logging configuration (optional)
 wandb:
   enabled: true
-  project: d3-dna-diffusion
+  project: d3-promoter
   name: promoter-transformer
   entity: d3-cshl
   tags: []
