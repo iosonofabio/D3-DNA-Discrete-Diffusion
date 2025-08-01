@@ -89,8 +89,8 @@ model:
 
 # Logging configuration (optional)
 wandb:
-  enabled: false
-  project: d3-dna-diffusion
+  enabled: true
+  project: d3-lentimpra
   name: lentimpra-convolutional
   entity: d3-cshl
   tags: []
