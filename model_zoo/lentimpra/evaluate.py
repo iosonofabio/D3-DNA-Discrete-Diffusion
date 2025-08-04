@@ -8,14 +8,12 @@ Uses the existing LegNet oracle from mpralegnet.py.
 
 import os
 import sys
-import argparse
 from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
 from omegaconf import OmegaConf
 from typing import Optional
-from tqdm import tqdm
 import h5py
 import numpy as np
 
@@ -24,7 +22,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 # Import base framework and LentIMPRA-specific components
-from scripts.evaluate import BaseEvaluator, parse_base_args, main_evaluate
+from scripts.evaluate import BaseEvaluator, parse_base_args
 from model_zoo.lentimpra.data import get_lentimpra_datasets
 
 
@@ -75,7 +73,7 @@ class LentIMPRAEvaluator(BaseEvaluator):
         """Load LentIMPRA oracle model using existing LegNet infrastructure."""
         try:
             # Import existing LegNet components from mpralegnet
-            from model_zoo.lentimpra.mpralegnet import load_model, TrainingConfig
+            from model_zoo.lentimpra.mpralegnet import load_model
             
             # Check if config file exists alongside checkpoint
             oracle_dir = os.path.dirname(oracle_checkpoint)
@@ -124,69 +122,45 @@ class LentIMPRAEvaluator(BaseEvaluator):
             print(f"Error loading original test data: {e}")
             return torch.zeros(100, 230, 4)
     
-    def evaluate_with_sampling(self, checkpoint_path: str, config: OmegaConf, 
-                              oracle_checkpoint: str, data_path: str,
-                              split: str = 'test', steps: Optional[int] = None, 
-                              batch_size: Optional[int] = None, architecture: str = 'transformer',
-                              show_progress: bool = False, save_sequences: bool = False):
+    def compute_sp_mse(self, sampled_sequences: torch.Tensor, oracle_model, 
+                      original_data: torch.Tensor) -> float:
         """
-        Evaluate LentIMPRA model with sampling and SP-MSE computation.
+        Compute SP-MSE using LentIMPRA oracle model (overrides base implementation).
+        
+        Args:
+            sampled_sequences: Generated sequences (one-hot format)
+            oracle_model: LentIMPRA oracle model with predict() method
+            original_data: Original test data for comparison
+            
+        Returns:
+            SP-MSE score
         """
-        print(f"Evaluating {self.dataset_name} on {split} split with sampling...")
+        import torch.nn.functional as F
         
-        # Set default steps to sequence length if not provided
-        if steps is None:
-            steps = self.get_sequence_length(config)
-            print(f"Using default steps: {steps} (sequence length)")
+        # Convert sampled sequences from one-hot to format expected by oracle
+        # sampled_sequences: (batch_size, seq_len, 4) one-hot
+        # oracle expects: (batch_size, 4, seq_len) for LegNet
+        if sampled_sequences.shape[-1] == 4:  # (batch_size, seq_len, 4)
+            sampled_input = sampled_sequences.permute(0, 2, 1).to(self.device)  # -> (batch_size, 4, seq_len)
+        else:  # Already (batch_size, 4, seq_len)
+            sampled_input = sampled_sequences.to(self.device)
         
-        # Create dataloader
-        dataloader = self.create_dataloader(config, split, batch_size)
+        # Convert original data to format expected by oracle
+        # original_data: (batch_size, seq_len, 4) one-hot from H5
+        if original_data.shape[-1] == 4:  # (batch_size, seq_len, 4)
+            original_input = original_data.permute(0, 2, 1).to(self.device)  # -> (batch_size, 4, seq_len)
+        else:  # Already (batch_size, 4, seq_len)
+            original_input = original_data.to(self.device)
         
-        # Sample sequences using PC sampler
-        print(f"Sampling sequences with PC sampler ({steps} steps)...")
-        sampled_sequences, target_labels = self.sample_sequences_for_evaluation(
-            checkpoint_path, config, dataloader, steps, architecture, show_progress
-        )
-        
-        # Save sequences as NPZ if requested
-        if save_sequences:
-            # Create output path based on checkpoint directory
-            checkpoint_dir = os.path.dirname(checkpoint_path)
-            npz_path = os.path.join(checkpoint_dir, "sample.npz")
-            self.save_sequences_as_npz(sampled_sequences, npz_path)
-        
-        # Load oracle model
-        print("Loading LegNet oracle model for SP-MSE evaluation...")
-        oracle_model = self.load_oracle_model(oracle_checkpoint, data_path)
-        
-        if oracle_model is None:
-            return {
-                'error': 'oracle_model_not_loaded',
-                'num_samples': sampled_sequences.shape[0],
-                'sequence_length': sampled_sequences.shape[1],
-                'sampling_steps': steps
-            }
-        
-        # Get original test data for comparison
-        original_data = self.get_original_test_data(data_path)
+        # Get oracle predictions using LentIMPRA's predict method
+        val_score = oracle_model.predict(original_input)
+        val_pred_score = oracle_model.predict(sampled_input)
         
         # Compute SP-MSE
-        print("Computing SP-MSE...")
-        sp_mse = self.compute_sp_mse(sampled_sequences, oracle_model, original_data)
+        sp_mse = (val_score - val_pred_score) ** 2
+        mean_sp_mse = torch.mean(sp_mse).cpu().item()
         
-        results = {
-            'dataset': self.dataset_name,
-            'split': split,
-            'num_samples': sampled_sequences.shape[0],
-            'sequence_length': sampled_sequences.shape[1],
-            'sampling_steps': steps,
-            'sp_mse': sp_mse,
-            'oracle_evaluation': 'completed'
-        }
-        
-        print(f"SP-MSE: {sp_mse:.6f}")
-        
-        return results
+        return mean_sp_mse
 
 
 def load_default_config():
@@ -226,7 +200,7 @@ def main():
     config = OmegaConf.load(args.config)
     evaluator = LentIMPRAEvaluator()
     
-    # Run evaluation (always includes sampling + SP-MSE computation)
+    # Use the base framework's evaluate_with_sampling method
     metrics = evaluator.evaluate_with_sampling(
         checkpoint_path=args.checkpoint,
         config=config,
